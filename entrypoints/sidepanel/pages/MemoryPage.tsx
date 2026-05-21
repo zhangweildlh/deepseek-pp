@@ -20,7 +20,28 @@ export default function MemoryPage() {
     setMemories(list ?? []);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    void load();
+
+    const handleStateUpdate = (message: { type?: string; memories?: Memory[] }) => {
+      if (message.type === 'STATE_UPDATED' && Array.isArray(message.memories)) {
+        setMemories(message.memories);
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (!document.hidden) void load();
+    };
+
+    chrome.runtime.onMessage.addListener(handleStateUpdate);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshWhenVisible);
+
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleStateUpdate);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshWhenVisible);
+    };
+  }, []);
 
   const filtered = filter === 'all' ? memories : memories.filter((m) => m.type === filter);
 

@@ -214,6 +214,8 @@ async function handleMessage(
 }
 
 async function broadcastToTabs(payload: Record<string, unknown>, excludeTabId?: number) {
+  chrome.runtime.sendMessage(payload).catch(() => {});
+
   const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
   for (const tab of tabs) {
     if (tab.id && tab.id !== excludeTabId) {

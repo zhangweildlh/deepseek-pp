@@ -56,6 +56,27 @@ export interface ToolCall {
   raw: string;
 }
 
+export interface ToolCardResult {
+  ok: boolean;
+  summary: string;
+  detail?: string;
+}
+
+export interface ToolExecutionRecord {
+  name: string;
+  result: ToolCardResult;
+}
+
+export interface ToolCallRestoreRecord {
+  id: string;
+  calls?: ToolCall[];
+  executions?: ToolExecutionRecord[];
+  content?: string;
+  source?: 'history' | 'storage';
+  url?: string;
+  createdAt?: number;
+}
+
 export interface SystemPromptPreset {
   id: string;
   name: string;

@@ -1,14 +1,24 @@
 # DeepSeek++
 
-为 [DeepSeek](https://chat.deepseek.com) 网页版注入 **Agentic 记忆系统**、**Skill 技能系统** 和 **系统提示词预设** 的 Chrome 扩展。
+为 [DeepSeek](https://chat.deepseek.com) 网页版注入 **类原生工具调用**、**Agentic 记忆系统**、**Skill 技能系统** 和 **系统提示词预设** 的 Chrome 扩展。
 
-让 DeepSeek 拥有跨对话的长期记忆，通过 `/skill` 指令一键切换专家模式，并支持自定义系统提示词全局生效。
+让 DeepSeek 像支持原生 tools 一样自动执行记忆保存、更新、删除等动作，拥有跨对话长期记忆，并通过 `/skill` 指令一键切换专家模式。
 
 ## 核心功能
 
+### 类原生工具调用
+
+- **XML 工具协议** — 在 prompt 中向模型注入 `memory_save`、`memory_update`、`memory_delete` 等工具 schema，模型按 `<tool_name>{JSON}</tool_name>` 输出调用请求
+- **流式拦截执行** — 扩展在 SSE 响应流中实时识别工具调用，自动转发给 Content Script 执行，不需要用户复制或手动确认
+- **隐藏原始调用** — 页面不会暴露 XML/JSON 工具块；工具调用会从正文、历史消息和 IndexedDB 缓存中清理
+- **DeepSeek 原生观感** — 执行结果渲染成类似「已思考」的折叠区块，例如「已执行工具（2次）」并逐条展示 `memory_save 已保存 · 宠物信息`
+- **多工具连续执行** — 同一条回复可以执行多次工具调用，适合把多个独立事实分别保存为多条记忆
+- **刷新后恢复** — 工具执行记录会短期持久化，并在刷新会话后恢复展示，避免刚执行完的工具状态消失
+- **历史兼容** — 新 XML 协议和旧 DSML 工具调用历史都能被解析、清理和恢复
+
 ### 记忆系统
 
-- **自动记忆** — AI 在对话中识别到关键信息时，通过 tool_call 自动保存为长期记忆
+- **自动记忆** — AI 在对话中识别到关键信息时，通过 `memory_save` 工具自动保存为长期记忆
 - **智能注入** — 每次对话时，根据关键词匹配、置顶权重、访问频率等维度，自动筛选相关记忆注入 prompt
 - **四种类型** — 用户画像 (`user`)、行为反馈 (`feedback`)、话题上下文 (`topic`)、参考资料 (`reference`)
 - **侧边栏管理** — 查看、编辑、置顶、删除记忆，支持按类型筛选和标签管理
@@ -40,13 +50,21 @@
 
 ### 工作原理
 
-扩展在 main world 中拦截 `fetch` 和 `XMLHttpRequest`，在请求发送到 DeepSeek API 前修改 prompt（注入记忆/技能指令），并解析 SSE 响应流以提取和处理 tool_call 指令。
+扩展在 main world 中拦截 `fetch` 和 `XMLHttpRequest`，在请求发送到 DeepSeek API 前修改 prompt（注入预设、记忆、技能指令和工具 schema），并解析 SSE 响应流以提取、隐藏和执行工具调用。
 
 ```
-用户输入 → 拦截请求 → 注入预设 + 记忆 + 技能指令 → DeepSeek API
-                                                        ↓
-侧边栏 ← IndexedDB/Storage ← 提取 tool_call ← 解析 SSE 响应
+用户输入 → 拦截请求 → 注入预设 + 记忆 + 技能指令 + tools schema → DeepSeek API
+                                                                    ↓
+页面折叠区块 ← 执行结果持久化 ← Content Script 执行工具 ← SSE 流式解析/隐藏工具调用
+       ↓
+侧边栏 ← IndexedDB/Storage ← 记忆保存/更新/删除
 ```
+
+工具调用链路分为三层：
+
+1. **Main World**：拦截网络请求和响应流，收集完整回复，识别 XML 工具块，过滤页面可见文本。
+2. **Content Script**：接收工具调用，执行记忆增删改，渲染「已执行工具」折叠区块，并恢复刷新后的执行状态。
+3. **Background**：统一处理 `SAVE_MEMORY`、`UPDATE_MEMORY`、`DELETE_MEMORY` 等消息，持久化数据并广播状态更新。
 
 ## 安装
 
@@ -88,7 +106,7 @@ npm run compile # TypeScript 类型检查
 core/
 ├── constants.ts          # API 地址、token 预算、系统模板
 ├── types.ts              # 类型定义
-├── interceptor/          # 网络拦截（fetch hook、SSE 解析、tool_call 提取）
+├── interceptor/          # 网络拦截（fetch/XHR hook、SSE 解析、工具调用提取/清理）
 ├── memory/               # 记忆系统（存储、评分筛选、prompt 注入）
 ├── skill/                # 技能系统（内置技能、解析器、注册表）
 ├── preset/               # 系统提示词预设（存储、激活管理）
@@ -96,8 +114,8 @@ core/
 
 entrypoints/
 ├── background.ts         # Service Worker（消息路由、数据持久化）
-├── content.ts            # Content Script（DOM 集成、tool_call 处理）
-├── main-world.content.ts # Main World 脚本（网络拦截）
+├── content.ts            # Content Script（DOM 集成、工具执行、结果区块恢复）
+├── main-world.content.ts # Main World 脚本（网络拦截、工具调用桥接）
 └── sidepanel/            # 侧边栏 React 应用（记忆/技能/设置页面）
 ```
 
