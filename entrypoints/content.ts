@@ -10,6 +10,7 @@ import type {
   ToolExecutionRecord,
 } from '../core/types';
 import { TOOL_NAMES } from '../core/constants';
+import { normalizeBackgroundConfig } from '../core/background/config';
 import { stripToolCalls } from '../core/interceptor/tool-parser';
 import {
   AUTOMATION_BRIDGE_TIMEOUT_MS,
@@ -40,6 +41,7 @@ const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let restoredRenderAttempts = 0;
 const pendingToolExecutionTasks = new Set<Promise<ToolCardResult>>();
+let backgroundPatchObserver: MutationObserver | null = null;
 
 export default defineContentScript({
   matches: ['*://chat.deepseek.com/*'],
@@ -902,6 +904,8 @@ function patchContainerBackgrounds() {
 }
 
 function removeBackground() {
+  backgroundPatchObserver?.disconnect();
+  backgroundPatchObserver = null;
   document.getElementById('dpp-bg')?.remove();
   document.getElementById('dpp-bg-style')?.remove();
   document.body.classList.remove('dpp-bg-active');
@@ -911,9 +915,13 @@ function removeBackground() {
 }
 
 function applyBackground(config: BackgroundConfig | null) {
-  const imageUrl = config?.enabled
-    ? (config.type === 'url' ? config.url : config.imageData) || null
-    : null;
+  const normalizedConfig = normalizeBackgroundConfig(config);
+  if (!normalizedConfig?.enabled) {
+    removeBackground();
+    return;
+  }
+
+  const imageUrl = (normalizedConfig.type === 'url' ? normalizedConfig.url : normalizedConfig.imageData) || null;
 
   if (!imageUrl) {
     removeBackground();
@@ -925,8 +933,8 @@ function applyBackground(config: BackgroundConfig | null) {
 
   document.body.classList.add('dpp-bg-active');
 
-  const overlayAlpha = (1 - config!.opacity).toFixed(3);
-  const blurPx = ((1 - config!.opacity) * 8).toFixed(1);
+  const overlayAlpha = (1 - normalizedConfig.opacity).toFixed(3);
+  const blurPx = ((1 - normalizedConfig.opacity) * 8).toFixed(1);
   document.body.style.setProperty('--dpp-overlay-light', `rgba(255, 255, 255, ${overlayAlpha})`);
   document.body.style.setProperty('--dpp-overlay-dark', `rgba(30, 30, 30, ${overlayAlpha})`);
   document.body.style.setProperty('--dpp-blur', `blur(${blurPx}px)`);
@@ -994,10 +1002,11 @@ function applyBackground(config: BackgroundConfig | null) {
   patchContainerBackgrounds();
 
   // Re-patch on DOM changes
-  const observer = new MutationObserver(() => {
+  backgroundPatchObserver?.disconnect();
+  backgroundPatchObserver = new MutationObserver(() => {
     if (document.body.classList.contains('dpp-bg-active')) {
       patchContainerBackgrounds();
     }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  backgroundPatchObserver.observe(document.body, { childList: true, subtree: true });
 }
