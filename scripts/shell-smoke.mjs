@@ -12,6 +12,7 @@ const USER_LOCAL_BIN_DIR = resolve(homedir(), '.local', 'bin');
 
 let passed = 0;
 let failed = 0;
+let reportedShell = null;
 
 function sendNativeMessage(child, message) {
   const json = JSON.stringify(message);
@@ -131,8 +132,11 @@ await testMethod('tools/call shell_status', 'tools/call', {
   arguments: {},
 }, (res) => {
   assert(res.result, 'expected result');
-  assert(res.result.structuredContent?.data?.platform, 'expected platform in status');
-  assert(res.result.structuredContent?.data?.nodeVersion, 'expected nodeVersion');
+  const data = res.result.structuredContent?.data;
+  assert(data?.platform, 'expected platform in status');
+  assert(data?.nodeVersion, 'expected nodeVersion');
+  assert(data?.shell, 'expected shell in status');
+  reportedShell = data.shell;
 });
 
 await testMethod('tools/call shell_exec (echo)', 'tools/call', {
@@ -143,6 +147,7 @@ await testMethod('tools/call shell_exec (echo)', 'tools/call', {
   const data = res.result.structuredContent?.data;
   assert(data, 'expected structured data');
   assert(data.exitCode === 0, `expected exitCode 0, got ${data.exitCode}`);
+  assert(data.shell === reportedShell, `expected shell_exec shell ${data.shell} to match shell_status ${reportedShell}`);
   assert(data.stdout.trim() === 'hello_world', `expected hello_world, got "${data.stdout.trim()}"`);
 });
 

@@ -142,6 +142,7 @@ function renderShellMcpHint(
     statusName
       ? `Use <${statusName}>{}</${statusName}> first when you need host status, shell, PATH, or working-directory context.`
       : '',
+    'Match command syntax to shell_status.shell. On Windows the Shell Local host uses PowerShell by default, so use PowerShell commands such as Get-ChildItem -Name and quote paths once inside the command string. Use cmd.exe /c explicitly only when you need CMD syntax such as dir /b.',
     `Recognized shell tool names: ${SHELL_TOOL_NAMES.join(', ')}`,
   ].filter(Boolean).join('\n');
 }

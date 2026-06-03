@@ -40,7 +40,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'shell_exec',
     title: 'Execute Shell Command',
-    description: 'Execute a shell command on the local system. Returns stdout, stderr, and exit code.',
+    description: 'Execute a command in the shell reported by shell_status. Returns stdout, stderr, and exit code.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -224,9 +224,7 @@ async function handleCallTool(id, params) {
 
 function execCommand(command, { cwd, env, timeoutMs }) {
   return new Promise((resolve, reject) => {
-    const isWin = platform() === 'win32';
-    const shellArgs = isWin ? ['/c', command] : ['-c', command];
-    const shellBin = isWin ? 'cmd.exe' : DEFAULT_SHELL;
+    const { shellBin, shellArgs } = createShellInvocation(command);
 
     const child = spawn(shellBin, shellArgs, {
       cwd,
@@ -273,6 +271,7 @@ function execCommand(command, { cwd, env, timeoutMs }) {
       clearTimeout(timer);
       resolve({
         command,
+        shell: shellBin,
         exitCode: timedOut ? -1 : (exitCode ?? -1),
         signal: signal || (timedOut ? 'SIGTERM' : null),
         stdout: Buffer.concat(stdout).toString('utf8'),
@@ -282,6 +281,23 @@ function execCommand(command, { cwd, env, timeoutMs }) {
       });
     });
   });
+}
+
+function createShellInvocation(command) {
+  if (platform() === 'win32') {
+    return {
+      shellBin: DEFAULT_SHELL,
+      shellArgs: [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        command,
+      ],
+    };
+  }
+
+  return { shellBin: DEFAULT_SHELL, shellArgs: ['-c', command] };
 }
 
 function formatExecSummary(result) {

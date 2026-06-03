@@ -250,6 +250,9 @@ const DEEPSEEK_OFFICECLI_EXECUTION_GUARDRAILS = `你正在 DeepSeek++ 内使用 
 - Shell 工具通过 Chrome Native Messaging 与本机 host (${SHELL_MCP_NATIVE_HOST}) 通信。
 - 所有 OfficeCLI 操作都通过 shell_exec 执行，例如 <shell_exec>{"command":"${OFFICECLI_BIN_PATH} --version"}</shell_exec>。
 - 不要输出伪 JSON 调用；DeepSeek++ 只执行 <shell_exec>{"command":"..."}</shell_exec> 这种 XML 标签格式。
+- 首次处理 Office 文档时先调用 shell_status，之后必须使用返回的 shell 对应的命令语法。
+- Windows 默认 shell 是 PowerShell：列目录用 Get-ChildItem -Name，不要把 CMD 的 dir /b 或 Unix 的 which/sed/find 直接当 PowerShell 命令。
+- Windows 路径在 JSON 中使用双反斜杠或正斜杠，并在命令字符串里只包一层引号，例如 <shell_exec>{"command":"${OFFICECLI_BIN_PATH} view \\\"D:\\\\Documents\\\\Downloads\\\\123.docx\\\" text"}</shell_exec>。
 - 禁止使用 \`officecli new pptx/docx/xlsx "标题" --prompt "..."\`、\`--mode fast\`、\`login\`、\`set-key\`、\`whoami\` 等 hosted AI 生成/账号命令。
 - 如果 \`${OFFICECLI_BIN_PATH} --help\` 只显示 \`new\`、\`doctor\`、\`login\`、\`set-key\`、\`config\`、\`upgrade\`，说明当前二进制是生成额度版；必须停止并说明需要安装/切换到命令版 OfficeCLI。
 - 目标二进制必须在 \`--help\` 中出现 \`view\`、\`get\`、\`set\`、\`add\`、\`validate\`、\`batch\` 等命令，且支持全局 \`--json\`。
@@ -260,6 +263,12 @@ const DEEPSEEK_OFFICECLI_EXECUTION_GUARDRAILS = `你正在 DeepSeek++ 内使用 
 ## 启动检查
 
 首次处理 Office 文档时，先执行：
+<shell_status>{}</shell_status>
+
+如果 shell_status 返回 Windows / powershell.exe，再执行：
+<shell_exec>{"command":"Get-Command ${OFFICECLI_BIN_PATH} -All | Select-Object -ExpandProperty Source\\n${OFFICECLI_BIN_PATH} --version\\n${OFFICECLI_BIN_PATH} --help | Select-Object -First 140","timeout_ms":60000}</shell_exec>
+
+如果 shell_status 返回 macOS / Linux，再执行：
 <shell_exec>{"command":"which -a officecli || true\\nofficecli --version\\nofficecli --help | sed -n '1,140p'","timeout_ms":60000}</shell_exec>
 
 如果第一条 \`officecli\` 指向项目的 \`node_modules/.bin/officecli\`，或 help 输出是 hosted AI 生成版，停止并报告二进制不兼容。不要退回 \`new --prompt\`。`;
