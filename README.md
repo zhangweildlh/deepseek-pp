@@ -51,7 +51,7 @@ DeepSeek++ 是面向 [DeepSeek](https://chat.deepseek.com) 网页版的 Chrome /
 | DeepSeek MCP tools | 在侧边栏管理 MCP 服务、工具权限和执行状态，并把工具结果带回同一会话继续生成。 |
 | DeepSeek memory / 长期记忆 | 自动保存、筛选和注入长期记忆，让不同对话可以复用用户偏好、项目背景和常用信息。 |
 | DeepSeek Skills / `/skill` 工作流 | 通过内置、自定义或 GitHub 导入的 Skill 快速切换专家模式和任务模板。 |
-| DeepSeek conversation export / 对话导出 | 在侧边栏把 DeepSeek 对话记录导出为 JSON、Markdown 或可打印 HTML，并保留附件引用和元数据。 |
+| DeepSeek conversation export / 对话导出 | 在 DeepSeek 回复工具栏里选择格式导出当前对话，支持 HTML、Markdown 和 PDF，并保留附件引用和元数据。 |
 | DeepSeek automation / 自动化任务 | 把固定任务放入独立 DeepSeek 会话，支持立即运行、定时触发、状态追踪和手动停止。 |
 | DeepSeek web search / 网页获取 | 在需要实时信息或指定网页内容时搜索互联网、读取网页文本，并继续生成最终回答。 |
 
@@ -88,9 +88,9 @@ DeepSeek++ 是面向 [DeepSeek](https://chat.deepseek.com) 网页版的 Chrome /
 
 ### 对话导出
 
-- **全量记录导出** — 在侧边栏「导出」页导出当前账号可访问的 DeepSeek 对话记录
-- **多格式输出** — 默认生成 JSON 和 Markdown，也可以生成可打印 HTML 作为 PDF 归档底稿
-- **两种模式** — 可读模式隐藏扩展内部提示和工具调用标记；原始模式保留官方原始 payload 便于自留备份
+- **当前对话导出** — 在 DeepSeek 回复下方的复制、分享等官方按钮同一排，导出当前对话
+- **格式可选** — 默认导出 HTML，也可选择 Markdown 或 PDF 文件
+- **可读模式** — 默认隐藏扩展内部提示和工具调用标记，导出文件更适合直接阅读和检索
 - **附件清单** — 导出消息中的文件引用、文件名、大小、状态和引用关系；文件正文导出会在下载链路验证完成后再启用
 - **本地保存** — 导出文件通过浏览器本地下载保存，DeepSeek++ 不运营用于收集导出数据的后台服务
 
@@ -220,7 +220,7 @@ npm run shell:install -- --browser chrome --extension-id <扩展ID>
 
 | 方向 | 主要变化 |
 |------|----------|
-| 对话导出 | 侧边栏新增「导出」页，可把当前账号可访问的 DeepSeek 对话导出为 JSON、Markdown 或可打印 HTML。 |
+| 对话导出 | 可把当前 DeepSeek 对话导出为 HTML、Markdown 或 PDF 文件。 |
 | 归档质量 | 导出内容支持可读模式和原始模式，并记录附件引用、文件名、大小、状态和消息关联。 |
 | Shell MCP | Windows Shell Host 的路径解析和中文输出更可靠，减少本机命令执行时的乱码和找不到命令问题。 |
 | 测试保障 | 新增 Vitest 单元测试覆盖请求增强、MCP 传输、记忆工具、同步 schema、Shell policy 和导出流程。 |

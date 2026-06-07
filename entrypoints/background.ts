@@ -107,6 +107,9 @@ import type { AutomationCreateInput, AutomationRunnerRequest, AutomationRunnerRe
 import type { ConversationExportProgress, ConversationExportResult } from '../core/export/types';
 
 const DEEPSEEK_HOME_URL = 'https://chat.deepseek.com/';
+const DEEPSEEK_TAB_URL_PATTERN = '*://chat.deepseek.com/*';
+const REFRESH_AUTH_MESSAGE = { type: 'REFRESH_DEEPSEEK_AUTH' } as const;
+const MISSING_DEEPSEEK_AUTH_MESSAGE = '请先在 chat.deepseek.com 登录，或刷新 DeepSeek 页面后重试。';
 let chatSessionId: string | null = null;
 let chatParentMessageId: number | null = null;
 const conversationExportControllers = new Map<string, AbortController>();
@@ -690,7 +693,7 @@ async function handleMessage(
       return { ok: true };
 
     case 'GET_AUTH_STATUS': {
-      const headers = await loadClientHeadersFromStorage();
+      const headers = await loadOrRefreshClientHeaders(sender.tab?.id);
       return { ok: true, hasToken: !!headers };
     }
 
@@ -716,7 +719,7 @@ async function handleMessage(
     }
 
     case 'AUTH_STATUS_CHANGED': {
-      const newHeaders = await loadClientHeadersFromStorage();
+      const newHeaders = await loadOrRefreshClientHeaders(sender.tab?.id);
       broadcastToTabs({ type: 'AUTH_STATUS_CHANGED', hasToken: !!newHeaders }).catch(() => {});
       return { ok: true };
     }
@@ -783,7 +786,7 @@ async function handleMessage(
 async function broadcastToTabs(payload: Record<string, unknown>, excludeTabId?: number) {
   chrome.runtime.sendMessage(payload).catch(() => {});
 
-  const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+  const tabs = await chrome.tabs.query({ url: DEEPSEEK_TAB_URL_PATTERN });
   for (const tab of tabs) {
     if (tab.id && tab.id !== excludeTabId) {
       chrome.tabs.sendMessage(tab.id, payload).catch(() => {});
@@ -792,6 +795,39 @@ async function broadcastToTabs(payload: Record<string, unknown>, excludeTabId?: 
   if (excludeTabId) {
     chrome.tabs.sendMessage(excludeTabId, payload).catch(() => {});
   }
+}
+
+async function loadOrRefreshClientHeaders(preferredTabId?: number): Promise<Record<string, string> | null> {
+  const cached = await loadClientHeadersFromStorage();
+  if (cached) return cached;
+
+  await refreshClientHeadersFromDeepSeekTabs(preferredTabId);
+  return loadClientHeadersFromStorage();
+}
+
+async function refreshClientHeadersFromDeepSeekTabs(preferredTabId?: number): Promise<boolean> {
+  const tabs = await getDeepSeekTabsForAuthRefresh(preferredTabId);
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, REFRESH_AUTH_MESSAGE);
+      if (response?.hasToken === true) return true;
+    } catch {
+      // Content scripts may be absent on stale or restricted tabs; try the next live DeepSeek tab.
+    }
+  }
+  return false;
+}
+
+async function getDeepSeekTabsForAuthRefresh(preferredTabId?: number): Promise<chrome.tabs.Tab[]> {
+  const tabs = await chrome.tabs.query({ url: DEEPSEEK_TAB_URL_PATTERN });
+  if (!preferredTabId) {
+    return tabs.sort((a, b) => Number(b.active) - Number(a.active));
+  }
+
+  const preferred = tabs.find((tab) => tab.id === preferredTabId);
+  if (!preferred) return tabs;
+  return [preferred, ...tabs.filter((tab) => tab.id !== preferredTabId)];
 }
 
 async function broadcastStateUpdate(excludeTabId?: number) {
@@ -855,12 +891,12 @@ async function handleConversationExport(
     ? value.exportId.trim()
     : crypto.randomUUID();
   const request = normalizeConversationExportRequest(value.request);
-  const headers = await loadClientHeadersFromStorage();
+  const headers = await loadOrRefreshClientHeaders(excludeTabId);
   if (!headers) {
     return {
       ok: false,
       exportId,
-      error: '请先在 chat.deepseek.com 登录并发送一条消息，让 DeepSeek++ 捕获官方网页认证信息。',
+      error: MISSING_DEEPSEEK_AUTH_MESSAGE,
     };
   }
 
@@ -1076,9 +1112,9 @@ function getSyncCounts(snapshot: SyncDataSnapshot): SyncCounts {
 }
 
 async function handleChatSubmitPrompt(prompt: string, excludeTabId?: number) {
-  const headers = await loadClientHeadersFromStorage();
+  const headers = await loadOrRefreshClientHeaders(excludeTabId);
   if (!headers) {
-    broadcastChatChunk({ text: '', done: true, error: '请先在 chat.deepseek.com 登录并发送一条消息以获取认证信息' }, excludeTabId);
+    broadcastChatChunk({ text: '', done: true, error: MISSING_DEEPSEEK_AUTH_MESSAGE }, excludeTabId);
     return;
   }
 

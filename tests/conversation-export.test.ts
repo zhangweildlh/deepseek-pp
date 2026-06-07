@@ -15,14 +15,15 @@ import {
   ConversationExportValidationError,
   normalizeConversationExportRequest,
 } from '../core/export/schema';
+import { normalizeDeepSeekHistory } from '../core/export/normalize';
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/deepseek-export');
 
 describe('conversation export request schema', () => {
-  it('defaults to sanitized JSON and Markdown with attachment metadata', () => {
+  it('defaults to sanitized HTML with attachment metadata', () => {
     expect(normalizeConversationExportRequest({})).toMatchObject({
       mode: 'sanitized',
-      formats: ['json', 'markdown'],
+      formats: ['html'],
       includeAttachmentMetadata: true,
       includeFileBodies: false,
       pageSize: 50,
@@ -37,12 +38,64 @@ describe('conversation export request schema', () => {
   it('fails closed for invalid explicit modes and formats', () => {
     expect(() => normalizeConversationExportRequest({ mode: 'readable' }))
       .toThrow(ConversationExportValidationError);
-    expect(() => normalizeConversationExportRequest({ formats: ['json', 'pdf'] }))
+    expect(() => normalizeConversationExportRequest({ formats: ['json'] }))
+      .toThrow(ConversationExportValidationError);
+    expect(() => normalizeConversationExportRequest({ formats: ['xml'] }))
+      .toThrow(ConversationExportValidationError);
+  });
+
+  it('normalizes explicit session ids for current-conversation export', () => {
+    expect(normalizeConversationExportRequest({ sessionIds: [' session-alpha ', 'session-alpha'] }))
+      .toMatchObject({ sessionIds: ['session-alpha'] });
+    expect(() => normalizeConversationExportRequest({ sessionIds: [''] }))
       .toThrow(ConversationExportValidationError);
   });
 });
 
 describe('DeepSeek conversation export adapter and service', () => {
+  it('reads message text from DeepSeek history fragments and nested content objects', () => {
+    const session = normalizeDeepSeekHistory({
+      id: 'session-fragments',
+      title: 'Nested content',
+      pinned: false,
+      titleType: null,
+      modelType: null,
+      createdAt: null,
+      updatedAt: null,
+    }, {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              id: 1,
+              message_role: 'user',
+              created_at: 1760000001,
+              fragments: [
+                { type: 'text', content: '早' },
+              ],
+            },
+            {
+              id: 2,
+              parent_id: 1,
+              message_role: 'assistant',
+              created_at: 1760000002,
+              message_content: {
+                parts: [
+                  { content_type: 'text', content: '早上好！' },
+                  { content_type: 'text', content: '新的一天开始了。' },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    }, { includeRaw: false });
+
+    expect(session.messages[0].content).toBe('早');
+    expect(session.messages[1].content).toContain('早上好！');
+    expect(session.messages[1].content).toContain('新的一天开始了。');
+  });
+
   it('paginates sessions and exports sanitized artifacts with attachment metadata', async () => {
     const fetchImpl = createFixtureFetch();
     const transport = createDeepSeekConversationExportTransport({
@@ -57,7 +110,7 @@ describe('DeepSeek conversation export adapter and service', () => {
       baseUrl: 'https://chat.deepseek.com',
       request: {
         mode: 'sanitized',
-        formats: ['json', 'markdown', 'html'],
+        formats: ['markdown', 'html', 'pdf'],
         includeAttachmentMetadata: true,
         includeFileBodies: false,
         pageSize: 1,
@@ -87,9 +140,14 @@ describe('DeepSeek conversation export adapter and service', () => {
     expect(exportData.sessions[0].failures[0].code).toBe('message_id_missing');
 
     const artifacts = buildConversationExportArtifacts(exportData);
-    expect(artifacts.map((artifact) => artifact.format)).toEqual(['json', 'markdown', 'html']);
+    expect(artifacts.map((artifact) => artifact.format)).toEqual(['markdown', 'html', 'pdf']);
     expect(artifacts.find((artifact) => artifact.format === 'markdown')?.content).toContain('Synthetic Alpha');
     expect(artifacts.find((artifact) => artifact.format === 'html')?.content).toContain('<!doctype html>');
+    expect(artifacts.find((artifact) => artifact.format === 'pdf')).toMatchObject({
+      filename: 'deepseek-conversations-sanitized-2026-06-06T00-00-01.pdf',
+      mimeType: 'application/pdf',
+    });
+    expect(artifacts.find((artifact) => artifact.format === 'pdf')?.content.startsWith('%PDF-1.4')).toBe(true);
   });
 
   it('derives the official pagination cursor from the last session', async () => {
@@ -120,7 +178,7 @@ describe('DeepSeek conversation export adapter and service', () => {
       baseUrl: 'https://chat.deepseek.com',
       request: {
         mode: 'raw',
-        formats: ['json'],
+        formats: ['html'],
         includeAttachmentMetadata: true,
         includeFileBodies: false,
         pageSize: 1,
@@ -136,6 +194,40 @@ describe('DeepSeek conversation export adapter and service', () => {
     expect(exportData.attachments[0].raw).toBeTruthy();
   });
 
+  it('exports explicit sessions without reading the session list', async () => {
+    let listedSessions = false;
+    const exportData = await runConversationExport({
+      exportId: 'export-current-session-test',
+      extensionVersion: '0.0.0-test',
+      baseUrl: 'https://chat.deepseek.com',
+      request: {
+        mode: 'sanitized',
+        formats: ['markdown'],
+        includeAttachmentMetadata: false,
+        includeFileBodies: false,
+        sessionIds: ['session-alpha'],
+      },
+      transport: {
+        async listSessions() {
+          listedSessions = true;
+          return [];
+        },
+        async fetchHistory({ session }) {
+          expect(session.id).toBe('session-alpha');
+          return readFixture('history-alpha.json');
+        },
+        async fetchFiles() {
+          throw new Error('fetchFiles should not run when attachment metadata is disabled.');
+        },
+      },
+    });
+
+    expect(listedSessions).toBe(false);
+    expect(exportData.sessions).toHaveLength(1);
+    expect(exportData.sessions[0].id).toBe('session-alpha');
+    expect(exportData.sessions[0].title).toBe('Synthetic Alpha');
+  });
+
   it('does not return artifacts after formatting is cancelled', async () => {
     const transport = createDeepSeekConversationExportTransport({
       baseUrl: 'https://chat.deepseek.com',
@@ -148,7 +240,7 @@ describe('DeepSeek conversation export adapter and service', () => {
       baseUrl: 'https://chat.deepseek.com',
       request: {
         mode: 'sanitized',
-        formats: ['json'],
+        formats: ['html'],
         includeAttachmentMetadata: false,
         includeFileBodies: false,
         pageSize: 1,

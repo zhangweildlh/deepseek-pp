@@ -1,4 +1,4 @@
-import { createExportFilename } from './artifact-json';
+import { createExportFilename } from './artifact-filename';
 import type {
   ConversationExport,
   ConversationExportArtifact,

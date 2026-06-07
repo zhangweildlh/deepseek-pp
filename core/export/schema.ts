@@ -5,11 +5,12 @@ import {
   type ConversationExportRequest,
 } from './types';
 
-const DEFAULT_FORMATS: ConversationExportFormat[] = ['json', 'markdown'];
-const SUPPORTED_FORMATS = new Set<ConversationExportFormat>(['json', 'markdown', 'html']);
+const DEFAULT_FORMATS: ConversationExportFormat[] = ['html'];
+const SUPPORTED_FORMATS = new Set<ConversationExportFormat>(['markdown', 'html', 'pdf']);
 const DEFAULT_PAGE_SIZE = 50;
 const MIN_PAGE_SIZE = 1;
 const MAX_PAGE_SIZE = 100;
+const MAX_SESSION_ID_COUNT = 100;
 
 export class ConversationExportValidationError extends Error {
   constructor(message: string) {
@@ -27,6 +28,7 @@ export function normalizeConversationExportRequest(input: unknown): Conversation
   const pageSize = normalizeOptionalInteger(value.pageSize, 'pageSize', MIN_PAGE_SIZE, MAX_PAGE_SIZE)
     ?? DEFAULT_PAGE_SIZE;
   const sessionLimit = normalizeOptionalInteger(value.sessionLimit, 'sessionLimit', 1, Number.MAX_SAFE_INTEGER);
+  const sessionIds = normalizeSessionIds(value.sessionIds);
   const includeFileBodies = value.includeFileBodies === true;
   if (includeFileBodies) {
     throw new ConversationExportValidationError(
@@ -41,6 +43,7 @@ export function normalizeConversationExportRequest(input: unknown): Conversation
     includeFileBodies: false,
     pageSize,
     ...(sessionLimit === undefined ? {} : { sessionLimit }),
+    ...(sessionIds === undefined ? {} : { sessionIds }),
   };
 }
 
@@ -101,6 +104,21 @@ function normalizeOptionalInteger(
     throw new ConversationExportValidationError(`${field} must be an integer between ${min} and ${max}.`);
   }
   return value;
+}
+
+function normalizeSessionIds(value: unknown): string[] | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SESSION_ID_COUNT) {
+    throw new ConversationExportValidationError(`sessionIds must include 1-${MAX_SESSION_ID_COUNT} non-empty strings.`);
+  }
+
+  const ids = value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new ConversationExportValidationError('sessionIds must include only non-empty strings.');
+    }
+    return item.trim();
+  });
+  return ids.filter((id, index) => ids.indexOf(id) === index);
 }
 
 function assertNonEmptyString(value: unknown, field: string): asserts value is string {

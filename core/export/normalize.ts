@@ -125,47 +125,88 @@ function extractMessages(bizData: Record<string, unknown>): unknown[] | null {
 
 function extractContentFragments(value: Record<string, unknown>): ExportedContentFragment[] {
   const fragments: ExportedContentFragment[] = [];
+  const seen = new Set<string>();
+  const append = (fragment: ExportedContentFragment | null) => {
+    if (!fragment?.text.trim()) return;
+    const normalized = { ...fragment, text: fragment.text.trim() };
+    const key = `${normalized.kind}\n${normalized.text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    fragments.push(normalized);
+  };
+
   const primary = firstString(
-    value.content,
     value.content_text,
     value.contentText,
     value.text,
     value.prompt,
     value.answer,
   );
-  if (primary) fragments.push({ kind: 'text', text: primary });
+  append(primary ? { kind: 'text', text: primary } : null);
 
-  if (Array.isArray(value.content)) {
-    for (const part of value.content) {
-      const fragment = normalizeContentPart(part);
-      if (fragment) fragments.push(fragment);
+  for (const part of getContentContainers(value)) {
+    for (const fragment of normalizeContentParts(part)) {
+      append(fragment);
     }
   }
 
   const reasoning = firstString(value.reasoning_content, value.reasoningContent, value.thinking_content);
-  if (reasoning) fragments.push({ kind: 'reasoning', text: reasoning });
+  append(reasoning ? { kind: 'reasoning', text: reasoning } : null);
 
   const toolText = firstString(value.tool_result, value.toolResult);
-  if (toolText) fragments.push({ kind: 'tool', text: toolText });
+  append(toolText ? { kind: 'tool', text: toolText } : null);
 
   return fragments;
+}
+
+function getContentContainers(value: Record<string, unknown>): unknown[] {
+  return [
+    value.content,
+    value.fragments,
+    value.message_content,
+    value.messageContent,
+    value.content_obj,
+    value.contentObj,
+    value.content_data,
+    value.contentData,
+  ].filter((item) => item !== undefined && item !== null && item !== '');
+}
+
+function normalizeContentParts(part: unknown): ExportedContentFragment[] {
+  if (Array.isArray(part)) {
+    return part.flatMap((item) => normalizeContentParts(item));
+  }
+  const fragment = normalizeContentPart(part);
+  if (fragment) return [fragment];
+
+  const value = asRecord(part);
+  const nested = [
+    value.fragments,
+    value.parts,
+    value.segments,
+    value.children,
+    value.contents,
+    typeof value.content === 'object' ? value.content : undefined,
+    typeof value.data === 'object' ? value.data : undefined,
+  ].filter((item) => item !== undefined && item !== null && item !== '');
+  return nested.flatMap((item) => normalizeContentParts(item));
 }
 
 function normalizeContentPart(part: unknown): ExportedContentFragment | null {
   if (typeof part === 'string' && part.trim()) return { kind: 'text', text: part };
   const value = asRecord(part);
-  const text = firstString(value.text, value.content, value.value);
+  const text = firstString(value.text, value.content, value.value, value.markdown, value.message, value.body);
   if (!text) return null;
-  const rawKind = firstString(value.type, value.kind);
-  const kind: ExportedContentFragment['kind'] =
-    rawKind === 'reasoning' || rawKind === 'thinking'
-      ? 'reasoning'
-      : rawKind === 'tool'
-        ? 'tool'
-        : rawKind === 'text'
-          ? 'text'
-          : 'unknown';
+  const kind = normalizeContentKind(firstString(value.type, value.kind, value.content_type, value.contentType));
   return { kind, text };
+}
+
+function normalizeContentKind(kind: string | null): ExportedContentFragment['kind'] {
+  const lower = kind?.toLowerCase();
+  if (lower === 'reasoning' || lower === 'thinking' || lower === 'think') return 'reasoning';
+  if (lower === 'tool' || lower === 'tool_result') return 'tool';
+  if (lower === 'text' || lower === 'markdown' || lower === 'content') return 'text';
+  return 'unknown';
 }
 
 function extractAttachmentRefs(value: Record<string, unknown>): ExportedAttachmentRef[] {

@@ -75,7 +75,7 @@ DeepSeek++ requests these Chrome permissions for the following purposes:
 Users can manage extension data from the DeepSeek++ side panel. Users can:
 
 - View, create, edit, export, import, and delete memories.
-- Export DeepSeek conversation history as local JSON, Markdown, or print-ready HTML files.
+- Export DeepSeek conversation history as local HTML, Markdown, or PDF files.
 - Create, edit, and delete custom skills and prompt presets.
 - Enable, disable, test, edit, and delete MCP servers.
 - Create, pause, run, edit, and delete automation tasks.
@@ -150,7 +150,7 @@ DeepSeek++ 只会将数据用于已经披露的功能：
 - 识别 DeepSeek 回复中的工具调用标记，执行已启用的工具，并展示可读的工具结果。
 - 在用户启用工具执行时，将选定工具结果回传到当前 DeepSeek 对话。
 - 运行用户创建的自动化任务。
-- 在用户从侧边栏主动开始导出时，将 DeepSeek 对话历史导出为本地文件。
+- 在用户从 DeepSeek 对话区主动开始导出时，将当前对话导出为本地文件。
 - 在用户启用同步时，将记忆、自定义技能和预设同步到用户配置的 WebDAV 服务器。
 - 在用户测试或执行工具时，连接用户配置的 MCP 端点或 Native Messaging host。
 
@@ -193,7 +193,7 @@ DeepSeek++ 请求以下 Chrome 权限：
 用户可以在 DeepSeek++ 侧边栏中管理扩展数据，包括：
 
 - 查看、创建、编辑、导出、导入和删除记忆。
-- 将 DeepSeek 对话历史导出为本地 JSON、Markdown 或可打印 HTML 文件。
+- 将 DeepSeek 对话历史导出为本地 HTML、Markdown 或 PDF 文件。
 - 创建、编辑和删除自定义技能和提示词预设。
 - 启用、禁用、测试、编辑和删除 MCP 服务。
 - 创建、暂停、运行、编辑和删除自动化任务。

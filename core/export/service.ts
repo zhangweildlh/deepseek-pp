@@ -1,7 +1,7 @@
 import { buildAttachmentManifest, collectAttachmentIds, normalizeDeepSeekFileMetadata } from './attachments';
 import { createConversationExportHtmlArtifact } from './artifact-html';
-import { createConversationExportJsonArtifact } from './artifact-json';
 import { createConversationExportMarkdownArtifact } from './artifact-markdown';
+import { createConversationExportPdfArtifact } from './artifact-pdf';
 import {
   normalizeConversationExportRequest,
   validateConversationExport,
@@ -59,13 +59,7 @@ export async function runConversationExport(input: RunConversationExportInput): 
   await report(input, 'starting', 'running', 0, 1, '准备导出');
   assertNotCancelled(input.signal);
 
-  await report(input, 'listing_sessions', 'running', 0, 1, '读取会话列表');
-  const sessionSummaries = await input.transport.listSessions({
-    pageSize: request.pageSize ?? 50,
-    sessionLimit: request.sessionLimit,
-    includeRaw,
-    signal: input.signal,
-  });
+  const sessionSummaries = await getSessionSummaries(input, request, includeRaw);
 
   const sessions = [];
   const failures: ConversationExportFailure[] = [];
@@ -144,6 +138,34 @@ export async function runConversationExport(input: RunConversationExportInput): 
   return validateConversationExport(finalExport);
 }
 
+async function getSessionSummaries(
+  input: RunConversationExportInput,
+  request: ConversationExportRequest,
+  includeRaw: boolean,
+): Promise<DeepSeekSessionSummary[]> {
+  if (request.sessionIds?.length) {
+    await report(input, 'listing_sessions', 'running', 0, request.sessionIds.length, '读取当前会话');
+    return request.sessionIds.map((id) => ({
+      id,
+      title: '当前对话',
+      pinned: false,
+      titleType: null,
+      modelType: null,
+      createdAt: null,
+      updatedAt: null,
+      ...(includeRaw ? { raw: { id, source: 'deepseek-pp-requested-session' } } : {}),
+    }));
+  }
+
+  await report(input, 'listing_sessions', 'running', 0, 1, '读取会话列表');
+  return input.transport.listSessions({
+    pageSize: request.pageSize ?? 50,
+    sessionLimit: request.sessionLimit,
+    includeRaw,
+    signal: input.signal,
+  });
+}
+
 export function buildConversationExportArtifacts(exportData: ConversationExport): ConversationExportArtifact[] {
   const artifacts: ConversationExportArtifact[] = [];
   for (const format of exportData.request.formats) {
@@ -171,8 +193,8 @@ function createConversationExportArtifact(
   exportData: ConversationExport,
   format: ConversationExportRequest['formats'][number],
 ): ConversationExportArtifact {
-  if (format === 'json') return createConversationExportJsonArtifact(exportData);
   if (format === 'markdown') return createConversationExportMarkdownArtifact(exportData);
+  if (format === 'pdf') return createConversationExportPdfArtifact(exportData);
   return createConversationExportHtmlArtifact(exportData);
 }
 

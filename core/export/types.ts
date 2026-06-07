@@ -4,7 +4,7 @@ export type ConversationExportSchemaVersion = typeof CONVERSATION_EXPORT_SCHEMA_
 
 export type ConversationExportMode = 'raw' | 'sanitized';
 
-export type ConversationExportFormat = 'json' | 'markdown' | 'html';
+export type ConversationExportFormat = 'markdown' | 'html' | 'pdf';
 
 export type ExportProgressPhase =
   | 'starting'
@@ -23,6 +23,7 @@ export interface ConversationExportRequest {
   includeFileBodies: boolean;
   pageSize?: number;
   sessionLimit?: number;
+  sessionIds?: string[];
 }
 
 export interface ConversationExportSource {

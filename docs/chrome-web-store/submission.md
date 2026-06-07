@@ -116,7 +116,7 @@ Connects to a user-configured local Native Messaging host for local MCP tools. T
 #### `sidePanel`
 
 ```text
-Provides the extension's management UI in Chrome's side panel for memories, skills, presets, MCP tools, conversation export, automation, sync, and settings.
+Provides the extension's management UI in Chrome's side panel for memories, skills, presets, MCP tools, automation, sync, and settings.
 ```
 
 #### Host permission: `*://chat.deepseek.com/*`
@@ -151,7 +151,7 @@ Use this reviewer note:
 3. Click the extension action to open the side panel.
 4. Create a memory or skill in the side panel.
 5. Send a DeepSeek message that uses the saved memory/skill. The extension should inject selected context and render tool execution results inline.
-6. Open the Export page in the side panel and start a sanitized JSON/Markdown export. The extension should save local export files after reading the reviewer's own DeepSeek session.
+6. In a DeepSeek conversation, use the DeepSeek++ export button next to the official reply actions such as copy and share. The extension should show format choices, default to HTML, and save the selected current-conversation export formats locally.
 7. Optional MCP/WebDAV/native messaging features require user-provided endpoints or a user-installed local Shell host and are disabled until configured by the user.
 ```
 

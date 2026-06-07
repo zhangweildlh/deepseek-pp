@@ -43,6 +43,11 @@ import {
 import { renderInlineMarkdown } from '../core/inline-agent/markdown';
 
 import { createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
+import type {
+  ConversationExportArtifact,
+  ConversationExportProgress,
+  ConversationExportResult,
+} from '../core/export/types';
 
 const TOOL_BLOCK_ID = 'dpp-tool-block';
 const TOOL_BLOCK_STYLE_ID = 'dpp-tool-block-css';
@@ -51,6 +56,15 @@ const REASONING_HOST_META_RE = /\b(?:reason|reasoning|think|thinking|thought)\b/
 const REASONING_HOST_TEXT_RE = /^(?:已思考|思考中|正在思考|thinking|reasoning|thought)(?:[（(:：]|$)/i;
 const TOKEN_SPEED_BADGE_ID = 'dpp-token-speed-badge';
 const TOKEN_SPEED_STYLE_ID = 'dpp-token-speed-css';
+const EXPORT_ACTION_CLASS = 'dpp-export-action';
+const EXPORT_ACTION_STYLE_ID = 'dpp-export-action-css';
+const EXPORT_ACTION_TOAST_CLASS = 'dpp-export-toast';
+const EXPORT_ACTION_MENU_CLASS = 'dpp-export-menu';
+const DEEPSEEK_ACTION_CONTROL_SELECTOR = 'button, [role="button"].ds-button';
+const EXPORT_ACTION_MOUNT_DEBOUNCE_MS = 250;
+const EXPORT_ACTION_RETRY_MS = 250;
+const EXPORT_ACTION_RETRY_LIMIT = 20;
+const EXPORT_ACTION_TOAST_VISIBLE_MS = 4000;
 const PET_HOST_ID = 'dpp-pet-host';
 const PET_STYLE_ID = 'dpp-pet-css';
 const TOKEN_SPEED_BOOTSTRAP_RETRY_MS = 250;
@@ -82,6 +96,18 @@ const PET_BUBBLE_VISIBLE_MS = 6000;
 const PET_BUBBLE_REPEAT_MIN_MS = 8000;
 const PET_BUBBLE_REPEAT_MAX_MS = 12000;
 const PET_BUBBLE_RECENT_LIMIT = 3;
+type ExportResponse = ConversationExportResult | { ok: false; exportId?: string; error: string };
+interface ConversationExportFormatOption {
+  format: ConversationExportArtifact['format'];
+  label: string;
+  defaultChecked: boolean;
+}
+
+const CONVERSATION_EXPORT_FORMAT_OPTIONS: ConversationExportFormatOption[] = [
+  { format: 'html', label: 'HTML', defaultChecked: true },
+  { format: 'markdown', label: 'Markdown', defaultChecked: false },
+  { format: 'pdf', label: 'PDF', defaultChecked: false },
+];
 // 这些状态会在长时间停留时周期性地轮播台词；其余状态只在进入时说一句。
 const PET_BUBBLE_LOOPING_STATES: ReadonlySet<PetState> = new Set<PetState>([
   'idle',
@@ -116,6 +142,15 @@ let tokenSpeedMountTimer: ReturnType<typeof setTimeout> | null = null;
 let lastTokenSpeedProgress: ResponseTokenSpeedPayload = createIdleTokenSpeedProgress();
 let tokenSpeedRouteKey = '';
 let tokenSpeedRouteTimer: ReturnType<typeof setInterval> | null = null;
+let exportActionObserver: MutationObserver | null = null;
+let exportActionMountTimer: ReturnType<typeof setTimeout> | null = null;
+let exportActionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let exportActionRetryAttempts = 0;
+let activeConversationExportId: string | null = null;
+let exportActionToastTimer: ReturnType<typeof setTimeout> | null = null;
+let exportActionMenuEl: HTMLElement | null = null;
+let exportActionMenuButton: HTMLButtonElement | null = null;
+let exportActionMenuSessionId: string | null = null;
 const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let restoredRenderAttempts = 0;
@@ -238,6 +273,7 @@ export default defineContentScript({
     startTokenSpeedIndicatorBootstrap();
     startTokenSpeedIndicatorMountObserver();
     startTokenSpeedRouteWatcher();
+    startConversationExportActionInjector();
 
     startRenderedToolCallCleaner();
     void restorePersistedToolBlocks();
@@ -263,6 +299,17 @@ export default defineContentScript({
         applyBackground(message.config as BackgroundConfig | null);
       } else if (message.type === 'PET_UPDATED') {
         applyPetConfig(message.config as PetConfig | null);
+      } else if (message.type === 'REFRESH_DEEPSEEK_AUTH') {
+        persistDeepSeekClientHeaders()
+          .then((hasToken) => sendResponse({ ok: hasToken, hasToken }))
+          .catch((error) => sendResponse({
+            ok: false,
+            hasToken: false,
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        return true;
+      } else if (message.type === 'DEEPSEEK_EXPORT_PROGRESS') {
+        updateConversationExportProgress(message.progress as ConversationExportProgress | undefined);
       }
       return undefined;
     });
@@ -445,21 +492,758 @@ function invalidateExtensionContext() {
   stopTokenSpeedIndicatorMountObserver();
   stopTokenSpeedRouteWatcher();
   removeTokenSpeedIndicator();
+  stopConversationExportActionInjector();
 }
 
 /** 主世界捕获到 DeepSeek 请求头后，隔离世界从 localStorage 读取 token 并持久化到 chrome.storage */
-async function persistDeepSeekClientHeaders(): Promise<void> {
+async function persistDeepSeekClientHeaders(): Promise<boolean> {
   try {
     const headers = createClientHeaders();
     if (headers) {
       rememberDeepSeekClientHeaders(headers);
-      await saveClientHeadersToStorage();
+      const saved = await saveClientHeadersToStorage();
+      if (!saved) return false;
       // 通知侧边栏重新检查登录状态
       chrome.runtime.sendMessage({ type: 'AUTH_STATUS_CHANGED' }).catch(() => {});
+      return true;
     }
-  } catch {
-    // 静默失败，用户发送下一条消息时会重试
+  } catch (error) {
+    if (isExtensionInvalidatedError(error)) {
+      invalidateExtensionContext();
+    }
   }
+  return false;
+}
+
+function startConversationExportActionInjector() {
+  injectConversationExportActionStyles();
+  mountConversationExportActions();
+
+  exportActionObserver?.disconnect();
+  exportActionObserver = new MutationObserver(() => scheduleConversationExportActionMount());
+  exportActionObserver.observe(document.body, { childList: true, subtree: true });
+  armConversationExportActionRetry();
+}
+
+function stopConversationExportActionInjector() {
+  exportActionObserver?.disconnect();
+  exportActionObserver = null;
+  clearConversationExportActionTimers();
+  closeConversationExportMenu();
+  document.querySelectorAll(`.${EXPORT_ACTION_CLASS}, .${EXPORT_ACTION_TOAST_CLASS}`)
+    .forEach((el) => el.remove());
+  document.getElementById(EXPORT_ACTION_STYLE_ID)?.remove();
+}
+
+function clearConversationExportActionTimers() {
+  if (exportActionMountTimer) {
+    clearTimeout(exportActionMountTimer);
+    exportActionMountTimer = null;
+  }
+  if (exportActionRetryTimer) {
+    clearTimeout(exportActionRetryTimer);
+    exportActionRetryTimer = null;
+  }
+  if (exportActionToastTimer) {
+    clearTimeout(exportActionToastTimer);
+    exportActionToastTimer = null;
+  }
+}
+
+function scheduleConversationExportActionMount() {
+  if (exportActionMountTimer) return;
+  exportActionMountTimer = setTimeout(() => {
+    exportActionMountTimer = null;
+    mountConversationExportActions();
+  }, EXPORT_ACTION_MOUNT_DEBOUNCE_MS);
+}
+
+function armConversationExportActionRetry() {
+  if (exportActionRetryAttempts >= EXPORT_ACTION_RETRY_LIMIT) return;
+  if (exportActionRetryTimer) clearTimeout(exportActionRetryTimer);
+  exportActionRetryTimer = setTimeout(() => {
+    exportActionRetryTimer = null;
+    exportActionRetryAttempts += 1;
+    const mountedCount = mountConversationExportActions();
+    if (mountedCount === 0) armConversationExportActionRetry();
+  }, EXPORT_ACTION_RETRY_MS);
+}
+
+function mountConversationExportActions(): number {
+  const sessionId = getCurrentChatSessionId();
+  closeConversationExportMenuIfSessionChanged(sessionId);
+  if (!sessionId) {
+    removeConversationExportActions();
+    return 0;
+  }
+
+  const messages = getAssistantExportMessages();
+  const mountedRows = new Set<HTMLElement>();
+  let mountedCount = 0;
+
+  for (const message of messages) {
+    const officialRow = findAssistantMessageActionRow(message);
+    if (officialRow) {
+      ensureConversationExportButton(officialRow, sessionId);
+      mountedRows.add(officialRow);
+      mountedCount += 1;
+    }
+  }
+
+  for (const row of findGlobalAssistantActionRows()) {
+    if (mountedRows.has(row)) continue;
+    ensureConversationExportButton(row, sessionId);
+    mountedRows.add(row);
+    mountedCount += 1;
+  }
+
+  return mountedCount;
+}
+
+function removeConversationExportActions() {
+  document.querySelectorAll(`.${EXPORT_ACTION_CLASS}`)
+    .forEach((el) => el.remove());
+}
+
+function getAssistantExportMessages(): Element[] {
+  return Array.from(document.querySelectorAll('.ds-message'))
+    .filter((message) => getAssistantContentHosts(message).length > 0);
+}
+
+function findAssistantMessageActionRow(message: Element): HTMLElement | null {
+  const responseHost = getAssistantResponseHost(message);
+  const controls = getDeepSeekActionControls(message)
+    .filter((control) => isOfficialActionControlCandidate(control, responseHost));
+
+  for (const control of controls) {
+    const row = findCompactActionRow(control, message, responseHost);
+    if (row) return row;
+  }
+
+  return null;
+}
+
+function getDeepSeekActionControls(root: ParentNode): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(DEEPSEEK_ACTION_CONTROL_SELECTOR));
+}
+
+function isOfficialActionControlCandidate(control: HTMLElement, responseHost: Element): boolean {
+  if (control.classList.contains(EXPORT_ACTION_CLASS)) return false;
+  if (responseHost.contains(control)) return false;
+  if (control.closest('.dpp-tool-block, .dpp-agent-container')) return false;
+  if (!isVisibleElement(control)) return false;
+
+  const rect = control.getBoundingClientRect();
+  if (rect.width > 64 || rect.height > 64) return false;
+  return true;
+}
+
+function findCompactActionRow(
+  control: HTMLElement,
+  message: Element,
+  responseHost: Element,
+): HTMLElement | null {
+  let el: HTMLElement | null = control.parentElement;
+  let depth = 0;
+  while (el && el !== message && depth < 6) {
+    const rowControls = getDeepSeekActionControls(el)
+      .filter((candidate) => isOfficialActionControlCandidate(candidate, responseHost));
+    if (rowControls.length >= 4 && isCompactActionRow(el, responseHost)) return el;
+    el = el.parentElement;
+    depth += 1;
+  }
+  return null;
+}
+
+function isCompactActionRow(row: HTMLElement, responseHost: Element): boolean {
+  const rowRect = row.getBoundingClientRect();
+  const responseRect = responseHost.getBoundingClientRect();
+  if (rowRect.width === 0 || rowRect.height === 0) return false;
+  if (rowRect.height > 72) return false;
+  if (responseRect.height > 0 && rowRect.top < responseRect.bottom - 12) return false;
+  return true;
+}
+
+function findGlobalAssistantActionRows(): HTMLElement[] {
+  const rows = new Set<HTMLElement>();
+  const controls = getDeepSeekActionControls(document)
+    .filter(isGlobalActionControlCandidate);
+
+  for (const control of controls) {
+    const row = findGlobalCompactActionRow(control);
+    if (row) rows.add(row);
+  }
+
+  return [...rows].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+}
+
+function isGlobalActionControlCandidate(control: HTMLElement): boolean {
+  if (control.classList.contains(EXPORT_ACTION_CLASS)) return false;
+  if (control.closest('.dpp-tool-block, .dpp-agent-container')) return false;
+  if (control.closest('aside, nav, header, [role="navigation"], [role="banner"]')) return false;
+  if (findDeepSeekInputBox()?.contains(control)) return false;
+  if (!isVisibleElement(control)) return false;
+
+  const rect = control.getBoundingClientRect();
+  if (rect.width > 64 || rect.height > 64) return false;
+  if (rect.left < getConversationViewportLeft()) return false;
+
+  const textarea = getPromptTextarea();
+  const textareaTop = textarea?.getBoundingClientRect().top ?? window.innerHeight;
+  if (rect.bottom >= textareaTop - 12) return false;
+  return true;
+}
+
+function findGlobalCompactActionRow(control: HTMLElement): HTMLElement | null {
+  let el: HTMLElement | null = control.parentElement;
+  let depth = 0;
+  while (el && el !== document.body && depth < 6) {
+    const rowControls = getDeepSeekActionControls(el)
+      .filter(isGlobalActionControlCandidate);
+    if (rowControls.length >= 4 && isLikelyReplyActionRow(el, rowControls)) return el;
+    el = el.parentElement;
+    depth += 1;
+  }
+  return null;
+}
+
+function isLikelyReplyActionRow(row: HTMLElement, rowControls: HTMLElement[]): boolean {
+  const rowRect = row.getBoundingClientRect();
+  if (rowRect.width === 0 || rowRect.height === 0) return false;
+  if (rowRect.height > 72) return false;
+
+  const textarea = getPromptTextarea();
+  const textareaTop = textarea?.getBoundingClientRect().top ?? window.innerHeight;
+  if (rowRect.bottom >= textareaTop - 12) return false;
+
+  const sortedControls = rowControls
+    .map((control) => control.getBoundingClientRect())
+    .sort((a, b) => a.left - b.left);
+  const first = sortedControls[0];
+  const last = sortedControls[sortedControls.length - 1];
+  if (!first || !last) return false;
+  return last.right - first.left <= 260;
+}
+
+function getConversationViewportLeft(): number {
+  const textarea = getPromptTextarea();
+  const inputBox = findDeepSeekInputBox();
+  const rect = (inputBox ?? textarea)?.getBoundingClientRect();
+  if (rect?.left && rect.left > 0) return Math.max(180, rect.left - 80);
+  return 180;
+}
+
+function ensureConversationExportButton(row: HTMLElement, sessionId: string): HTMLButtonElement {
+  let button = row.querySelector<HTMLButtonElement>(`:scope > .${EXPORT_ACTION_CLASS}`);
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = EXPORT_ACTION_CLASS;
+    button.innerHTML = createConversationExportActionIcon();
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (activeConversationExportId) return;
+      toggleConversationExportMenu(button!);
+    });
+  }
+
+  placeConversationExportButton(row, button);
+  button.dataset.dppExportSessionId = sessionId;
+  applyConversationExportButtonStatus(button, activeConversationExportId ? 'running' : 'idle');
+  return button;
+}
+
+function placeConversationExportButton(row: HTMLElement, button: HTMLButtonElement): void {
+  const officialControls = getDeepSeekActionControls(row)
+    .filter((control) => !control.classList.contains(EXPORT_ACTION_CLASS) && isVisibleElement(control))
+    .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+  const lastOfficialControl = officialControls[officialControls.length - 1];
+
+  if (!lastOfficialControl || lastOfficialControl.parentElement !== row) {
+    if (button.parentElement !== row) row.appendChild(button);
+    return;
+  }
+
+  if (lastOfficialControl.nextElementSibling !== button) {
+    lastOfficialControl.insertAdjacentElement('afterend', button);
+  }
+}
+
+function applyConversationExportButtonStatus(button: HTMLButtonElement, status: 'idle' | 'running') {
+  const running = status === 'running';
+  button.disabled = running;
+  button.dataset.status = status;
+  button.title = running ? '正在导出当前对话' : '导出当前对话';
+  button.setAttribute('aria-label', button.title);
+}
+
+function setConversationExportButtonsStatus(status: 'idle' | 'running') {
+  document.querySelectorAll<HTMLButtonElement>(`.${EXPORT_ACTION_CLASS}`)
+    .forEach((button) => applyConversationExportButtonStatus(button, status));
+}
+
+function toggleConversationExportMenu(button: HTMLButtonElement) {
+  if (exportActionMenuEl && exportActionMenuButton === button) {
+    closeConversationExportMenu();
+    return;
+  }
+  showConversationExportMenu(button);
+}
+
+function showConversationExportMenu(button: HTMLButtonElement) {
+  closeConversationExportMenu();
+
+  const sessionId = getCurrentChatSessionId();
+  if (!sessionId) {
+    showConversationExportToast('当前页面还没有可导出的对话。', 'error');
+    return;
+  }
+
+  const menu = document.createElement('div');
+  menu.className = EXPORT_ACTION_MENU_CLASS;
+  menu.setAttribute('role', 'dialog');
+  menu.setAttribute('aria-label', '选择导出格式');
+  menu.addEventListener('click', (event) => event.stopPropagation());
+
+  const form = document.createElement('form');
+  const title = document.createElement('div');
+  title.className = 'dpp-export-menu-title';
+  title.textContent = '导出格式';
+  form.appendChild(title);
+
+  for (const option of CONVERSATION_EXPORT_FORMAT_OPTIONS) {
+    const label = document.createElement('label');
+    label.className = 'dpp-export-menu-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'format';
+    input.value = option.format;
+    input.checked = option.defaultChecked;
+    const text = document.createElement('span');
+    text.textContent = option.label;
+    label.append(input, text);
+    form.appendChild(label);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'dpp-export-menu-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => closeConversationExportMenu());
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.textContent = '导出';
+  actions.append(cancel, submit);
+  form.appendChild(actions);
+
+  form.addEventListener('change', () => {
+    submit.disabled = getSelectedConversationExportFormats(menu).length === 0;
+  });
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const formats = getSelectedConversationExportFormats(menu);
+    if (formats.length === 0) return;
+    closeConversationExportMenu();
+    void startCurrentConversationExport(formats);
+  });
+
+  menu.appendChild(form);
+  document.body.appendChild(menu);
+  exportActionMenuEl = menu;
+  exportActionMenuButton = button;
+  exportActionMenuSessionId = sessionId;
+  positionConversationExportMenu(menu, button);
+  document.addEventListener('click', handleConversationExportMenuDocumentClick, true);
+  document.addEventListener('keydown', handleConversationExportMenuKeydown, true);
+}
+
+function positionConversationExportMenu(menu: HTMLElement, button: HTMLButtonElement) {
+  const buttonRect = button.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const gap = 8;
+  const margin = 12;
+  const belowTop = buttonRect.bottom + gap;
+  const aboveTop = buttonRect.top - menuRect.height - gap;
+  const top = belowTop + menuRect.height <= window.innerHeight - margin
+    ? belowTop
+    : Math.max(margin, aboveTop);
+  const left = Math.min(
+    window.innerWidth - menuRect.width - margin,
+    Math.max(margin, buttonRect.left + buttonRect.width / 2 - menuRect.width / 2),
+  );
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+}
+
+function getSelectedConversationExportFormats(menu: HTMLElement): ConversationExportArtifact['format'][] {
+  return Array.from(menu.querySelectorAll<HTMLInputElement>('input[name="format"]:checked'))
+    .map((input) => input.value)
+    .filter(isConversationExportUiFormat);
+}
+
+function isConversationExportUiFormat(value: string): value is ConversationExportArtifact['format'] {
+  return CONVERSATION_EXPORT_FORMAT_OPTIONS.some((option) => option.format === value);
+}
+
+function closeConversationExportMenu() {
+  document.removeEventListener('click', handleConversationExportMenuDocumentClick, true);
+  document.removeEventListener('keydown', handleConversationExportMenuKeydown, true);
+  exportActionMenuEl?.remove();
+  exportActionMenuEl = null;
+  exportActionMenuButton = null;
+  exportActionMenuSessionId = null;
+}
+
+function closeConversationExportMenuIfSessionChanged(sessionId = getCurrentChatSessionId()) {
+  if (!exportActionMenuEl) return;
+  if (sessionId === exportActionMenuSessionId) return;
+  closeConversationExportMenu();
+}
+
+function handleConversationExportMenuDocumentClick(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  if (exportActionMenuEl?.contains(target)) return;
+  if (exportActionMenuButton?.contains(target)) return;
+  closeConversationExportMenu();
+}
+
+function handleConversationExportMenuKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return;
+  closeConversationExportMenu();
+}
+
+async function startCurrentConversationExport(
+  selectedFormats: ConversationExportArtifact['format'][] = ['html'],
+) {
+  if (activeConversationExportId) return;
+  const sessionId = getCurrentChatSessionId();
+  if (!sessionId) {
+    showConversationExportToast('当前页面还没有可导出的对话。', 'error');
+    return;
+  }
+
+  const formats = dedupeConversationExportUiFormats(selectedFormats);
+  const exportId = crypto.randomUUID();
+  activeConversationExportId = exportId;
+  setConversationExportButtonsStatus('running');
+  showConversationExportToast('正在导出当前对话...', 'info');
+
+  try {
+    const response = await sendConversationExportRequest(exportId, sessionId, formats);
+    if (!response?.ok) {
+      throw new Error(response?.error ?? '导出失败');
+    }
+
+    for (const artifact of response.artifacts) {
+      if (formats.includes(artifact.format)) {
+        downloadConversationExportArtifact(artifact);
+      }
+    }
+
+    const warning = response.summary.failedSessionCount > 0;
+    showConversationExportToast(
+      warning
+        ? '导出完成，但部分会话读取失败，请检查导出文件中的 Export Warnings。'
+        : getConversationExportSuccessMessage(formats),
+      warning ? 'warning' : 'success',
+    );
+  } catch (error) {
+    showConversationExportToast(error instanceof Error ? error.message : String(error), 'error');
+  } finally {
+    if (activeConversationExportId === exportId) {
+      activeConversationExportId = null;
+      setConversationExportButtonsStatus('idle');
+    }
+  }
+}
+
+function dedupeConversationExportUiFormats(formats: ConversationExportArtifact['format'][]): ConversationExportArtifact['format'][] {
+  const values = formats.filter(isConversationExportUiFormat);
+  const deduped = values.filter((format, index) => values.indexOf(format) === index);
+  return deduped.length > 0 ? deduped : ['html'];
+}
+
+function getConversationExportSuccessMessage(formats: ConversationExportArtifact['format'][]): string {
+  if (formats.includes('pdf')) {
+    return '当前对话已导出。';
+  }
+  return '当前对话已导出。';
+}
+
+async function sendConversationExportRequest(
+  exportId: string,
+  sessionId: string,
+  formats: ConversationExportArtifact['format'][],
+): Promise<ExportResponse | undefined> {
+  if (!hasLiveExtensionContext()) return undefined;
+  try {
+    return await chrome.runtime.sendMessage({
+      type: 'EXPORT_DEEPSEEK_CONVERSATIONS',
+      payload: {
+        exportId,
+        request: {
+          mode: 'sanitized',
+          formats,
+          includeAttachmentMetadata: true,
+          includeFileBodies: false,
+          sessionIds: [sessionId],
+        },
+      },
+    }) as ExportResponse;
+  } catch (error) {
+    if (isExtensionInvalidatedError(error)) {
+      invalidateExtensionContext();
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function updateConversationExportProgress(progress: ConversationExportProgress | undefined) {
+  if (!progress || progress.exportId !== activeConversationExportId) return;
+  if (progress.status === 'running') {
+    setConversationExportButtonsStatus('running');
+  }
+}
+
+function getCurrentChatSessionId(): string | null {
+  const match = location.pathname.match(/\/(?:a\/)?chat\/s\/([^/?#]+)/);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function downloadConversationExportArtifact(artifact: ConversationExportArtifact) {
+  const blob = new Blob([artifact.content], { type: artifact.mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = artifact.filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showConversationExportToast(message: string, tone: 'info' | 'success' | 'warning' | 'error') {
+  let toast = document.querySelector<HTMLElement>(`.${EXPORT_ACTION_TOAST_CLASS}`);
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = EXPORT_ACTION_TOAST_CLASS;
+    toast.setAttribute('role', 'status');
+    document.body.appendChild(toast);
+  }
+
+  toast.textContent = message;
+  toast.dataset.tone = tone;
+  toast.dataset.visible = 'true';
+  if (exportActionToastTimer) clearTimeout(exportActionToastTimer);
+  exportActionToastTimer = setTimeout(() => {
+    exportActionToastTimer = null;
+    toast.dataset.visible = 'false';
+  }, EXPORT_ACTION_TOAST_VISIBLE_MS);
+}
+
+function isVisibleElement(el: HTMLElement): boolean {
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  return rect.width > 0 &&
+    rect.height > 0 &&
+    style.display !== 'none' &&
+    style.visibility !== 'hidden' &&
+    Number(style.opacity) !== 0;
+}
+
+function createConversationExportActionIcon(): string {
+  return `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 3v12"></path>
+      <path d="m7 10 5 5 5-5"></path>
+      <path d="M5 21h14"></path>
+    </svg>
+  `;
+}
+
+function injectConversationExportActionStyles() {
+  if (document.getElementById(EXPORT_ACTION_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = EXPORT_ACTION_STYLE_ID;
+  style.textContent = `
+    .${EXPORT_ACTION_CLASS} {
+      display: inline-flex;
+      flex: 0 0 28px;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      width: 28px;
+      height: 28px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #8a8f99;
+      cursor: pointer;
+      vertical-align: middle;
+      transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    }
+    .${EXPORT_ACTION_CLASS}:hover {
+      color: #4d6bfe;
+      background: rgba(77, 107, 254, 0.09);
+    }
+    .${EXPORT_ACTION_CLASS}:disabled {
+      cursor: default;
+      opacity: 0.68;
+    }
+    .${EXPORT_ACTION_CLASS}[data-status="running"] svg {
+      animation: dpp-export-pulse 0.9s ease-in-out infinite;
+    }
+    .${EXPORT_ACTION_CLASS} svg {
+      width: 18px;
+      height: 18px;
+      pointer-events: none;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} {
+      position: fixed;
+      z-index: 2147483647;
+      min-width: 176px;
+      box-sizing: border-box;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 16px 38px rgba(15, 23, 42, 0.18);
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} form {
+      margin: 0;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-title {
+      margin: 0 0 8px;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 30px;
+      border-radius: 7px;
+      padding: 4px 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-option:hover {
+      background: rgba(77, 107, 254, 0.08);
+    }
+    .${EXPORT_ACTION_MENU_CLASS} input {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: #4d6bfe;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(15, 23, 42, 0.08);
+    }
+    .${EXPORT_ACTION_MENU_CLASS} button {
+      min-width: 48px;
+      height: 28px;
+      border: 0;
+      border-radius: 7px;
+      padding: 0 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} button[type="button"] {
+      background: transparent;
+      color: #64748b;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} button[type="submit"] {
+      background: #4d6bfe;
+      color: #ffffff;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} button:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+    .${EXPORT_ACTION_TOAST_CLASS} {
+      position: fixed;
+      left: 50%;
+      bottom: 104px;
+      z-index: 2147483647;
+      max-width: min(420px, calc(100vw - 32px));
+      transform: translate(-50%, 10px);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 10px;
+      padding: 9px 12px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.45;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+    .${EXPORT_ACTION_TOAST_CLASS}[data-visible="true"] {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .${EXPORT_ACTION_TOAST_CLASS}[data-tone="success"] {
+      border-color: rgba(34, 197, 94, 0.28);
+    }
+    .${EXPORT_ACTION_TOAST_CLASS}[data-tone="warning"] {
+      border-color: rgba(245, 158, 11, 0.34);
+    }
+    .${EXPORT_ACTION_TOAST_CLASS}[data-tone="error"] {
+      border-color: rgba(239, 68, 68, 0.34);
+      color: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      .${EXPORT_ACTION_MENU_CLASS} {
+        border-color: rgba(255, 255, 255, 0.12);
+        background: rgba(31, 41, 55, 0.98);
+        color: #f9fafb;
+        box-shadow: 0 16px 38px rgba(0, 0, 0, 0.38);
+      }
+      .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-title,
+      .${EXPORT_ACTION_MENU_CLASS} button[type="button"] {
+        color: #cbd5e1;
+      }
+      .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-option:hover {
+        background: rgba(96, 165, 250, 0.14);
+      }
+      .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-actions {
+        border-top-color: rgba(255, 255, 255, 0.1);
+      }
+      .${EXPORT_ACTION_TOAST_CLASS} {
+        border-color: rgba(255, 255, 255, 0.14);
+        background: rgba(31, 41, 55, 0.96);
+        color: #f9fafb;
+      }
+      .${EXPORT_ACTION_TOAST_CLASS}[data-tone="error"] {
+        color: #fca5a5;
+      }
+    }
+    @keyframes dpp-export-pulse {
+      0%, 100% { transform: translateY(0); opacity: 1; }
+      50% { transform: translateY(1px); opacity: 0.62; }
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 async function sendRuntimeMessage<T>(message: unknown): Promise<T | undefined> {
@@ -1226,6 +2010,7 @@ function stopTokenSpeedRouteWatcher() {
 }
 
 function handleTokenSpeedRouteChange() {
+  closeConversationExportMenuIfSessionChanged();
   if (resetTokenSpeedOnRouteChange()) {
     renderTokenSpeedIndicator(lastTokenSpeedProgress);
   }
