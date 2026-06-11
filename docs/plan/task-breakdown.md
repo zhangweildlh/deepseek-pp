@@ -104,7 +104,7 @@
 
 | # | Task | Priority | Effort | Depends On | Lane | S.U.P.E.R | Test Expectation | Memory Impact | Acceptance Criteria |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|:--|
-| T4.1 | Add user-approved browser sandbox code runner for JS/TS/Python where available | P1 | L | T1.1,T1.4,T2.5 | A | P,E | Sandbox tests, approval tests, output-limit tests | Record no-silent-exec invariant | Code never runs without user action; output returns to the chat through a typed tool result |
+| T4.1 | Add isolated browser sandbox code runner for JS/TS/Python/HTML where available | P1 | L | T1.1,T1.4,T2.5 | A | P,E | Sandbox tests and output-limit tests | Record isolated-execution invariant | Code runs outside the DeepSeek page and returns to the chat through a typed tool result |
 | T4.2 | Add optional voice input and response read-aloud | P1 | M | T1.1 | B | S,E | Adapter tests with unsupported browser fallback | None | Users can enable STT/TTS where platform supports it; unsupported platforms show explicit state |
 | T4.3 | Add AI-assisted Skill creator tool with review-before-save | P1 | M | T1.2,T2.5 | C | P,U | Tool/runtime/Skill registry tests | Record review-before-save rule if accepted | Model-created skills enter existing custom Skill registry only after user review and name validation |
 | T4.4 | Add memory import from another AI workflow | P1 | M | T1.3 | C | P,U | Parser/schema/memory store tests | Record import format if durable | Imported profile text is converted into typed memories with preview, dedupe, and no automatic prompt mutation |

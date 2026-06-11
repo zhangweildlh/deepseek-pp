@@ -1,4 +1,4 @@
-import type { ArtifactFile, ArtifactRecord } from './types';
+import type { ArtifactFile, ArtifactRecord, ArtifactView } from './types';
 
 const STORAGE_KEY = 'deepseek_pp_artifacts';
 const MAX_ARTIFACTS = 50;
@@ -9,6 +9,7 @@ export async function saveArtifact(input: {
   mimeType: string;
   content: string;
   files?: ArtifactFile[];
+  view?: ArtifactView;
 }): Promise<ArtifactRecord> {
   const record: ArtifactRecord = {
     id: crypto.randomUUID(),
@@ -19,6 +20,7 @@ export async function saveArtifact(input: {
     sizeBytes: new TextEncoder().encode(input.content).length,
     createdAt: Date.now(),
     files: input.files,
+    view: input.view,
   };
   const records = await getArtifacts();
   await chrome.storage.local.set({

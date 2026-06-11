@@ -8,6 +8,14 @@ export interface ArtifactFile {
   mimeType?: string;
 }
 
+export type ArtifactPreviewMode = 'none' | 'html' | 'code';
+export type ArtifactRuntimeLanguage = 'html' | 'javascript' | 'typescript' | 'python' | 'text';
+
+export interface ArtifactView {
+  previewMode: ArtifactPreviewMode;
+  language: ArtifactRuntimeLanguage;
+}
+
 export interface ArtifactRecord {
   id: string;
   kind: ArtifactKind;
@@ -17,6 +25,7 @@ export interface ArtifactRecord {
   sizeBytes: number;
   createdAt: number;
   files?: ArtifactFile[];
+  view?: ArtifactView;
 }
 
 export interface ArtifactOutput {
@@ -27,4 +36,5 @@ export interface ArtifactOutput {
   mimeType: string;
   sizeBytes: number;
   fileCount?: number;
+  view?: ArtifactView;
 }

@@ -574,9 +574,16 @@ function hasLiveExtensionContext(): boolean {
   if (!extensionContextValid) return false;
 
   try {
-    if (typeof chrome === 'undefined') return false;
+    if (typeof chrome === 'undefined') {
+      invalidateExtensionContext();
+      return false;
+    }
     const runtime = chrome.runtime;
-    return Boolean(runtime?.id) && typeof runtime.sendMessage === 'function';
+    if (!runtime?.id || typeof runtime.sendMessage !== 'function') {
+      invalidateExtensionContext();
+      return false;
+    }
+    return true;
   } catch (error) {
     if (isExtensionInvalidatedError(error)) {
       invalidateExtensionContext();
@@ -2657,7 +2664,7 @@ async function executeToolCall(call: ToolCall): Promise<ToolCardResult> {
       detail: contentT('content.extensionReloaded'),
     };
   }
-  return createInvalidRuntimeToolResult(result);
+  return createInvalidRuntimeToolResult(call, result);
 }
 
 function shouldAutoRequestPermission(call: ToolCall, result: ToolCardResult): boolean {
@@ -2706,7 +2713,7 @@ function normalizeRuntimeToolCallResult(value: unknown): ToolCardResult | null {
   };
 }
 
-function createInvalidRuntimeToolResult(value: unknown): ToolCardResult {
+function createInvalidRuntimeToolResult(call: ToolCall, value: unknown): ToolCardResult {
   const missing = value === undefined || value === null;
   const message = missing
     ? 'Background did not return a tool result.'
@@ -2715,7 +2722,7 @@ function createInvalidRuntimeToolResult(value: unknown): ToolCardResult {
     ok: false,
     summary: contentT('content.toolBlock.summaries.backgroundFailed'),
     detail: missing
-      ? contentT('content.toolBlock.missingResultDetail')
+      ? getMissingToolResultDetail(call)
       : contentT('content.toolBlock.invalidResultDetail', { preview: previewUnknown(value) }),
     error: {
       code: missing ? 'runtime_tool_result_missing' : 'runtime_tool_result_invalid',
@@ -2723,6 +2730,27 @@ function createInvalidRuntimeToolResult(value: unknown): ToolCardResult {
       retryable: true,
     },
   };
+}
+
+function getMissingToolResultDetail(call: ToolCall): string {
+  if (isSandboxRuntimeToolCall(call)) {
+    return contentT('content.toolBlock.missingSandboxResultDetail');
+  }
+  if (isMcpRuntimeToolCall(call)) {
+    return contentT('content.toolBlock.missingMcpResultDetail');
+  }
+  return contentT('content.toolBlock.missingResultDetail');
+}
+
+function isSandboxRuntimeToolCall(call: ToolCall): boolean {
+  return call.name === 'sandbox_run' ||
+    call.provider?.id === 'sandbox' ||
+    call.descriptorId?.startsWith('local:sandbox:') === true;
+}
+
+function isMcpRuntimeToolCall(call: ToolCall): boolean {
+  return call.provider?.kind === 'mcp' ||
+    call.descriptorId?.startsWith('mcp:') === true;
 }
 
 function previewUnknown(value: unknown): string {

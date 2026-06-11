@@ -30,11 +30,6 @@ import {
   isArtifactToolName,
 } from '../artifact';
 import {
-  createSandboxToolDescriptors,
-  executeSandboxToolCall,
-  isSandboxToolName,
-} from '../sandbox';
-import {
   createSkillCreatorToolDescriptors,
   executeSkillCreatorToolCall,
   isSkillCreatorToolName,
@@ -74,7 +69,6 @@ export async function getRuntimeToolDescriptors(
     ...createMemoryToolDescriptors(locale),
     ...enabledWebDescriptors,
     ...createArtifactToolDescriptors(locale),
-    ...createSandboxToolDescriptors(locale),
     ...createSkillCreatorToolDescriptors(locale),
     ...createMemoryImportToolDescriptors(locale),
     ...await getMcpToolDescriptors(),
@@ -129,10 +123,6 @@ async function executeToolCallWithoutHistory(
 
   if (isArtifactToolName(call.name)) {
     return executeArtifactToolCall(call, locale);
-  }
-
-  if (isSandboxToolName(call.name)) {
-    return executeSandboxToolCall(call, locale);
   }
 
   if (isSkillCreatorToolName(call.name)) {

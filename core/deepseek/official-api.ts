@@ -1,28 +1,33 @@
-import type { ModelType } from '../types';
+import {
+  DEFAULT_OFFICIAL_API_CHAT_CONFIG,
+  normalizeOfficialApiChatConfig,
+  type OfficialApiChatConfig,
+} from '../chat/official-api-config';
 import { parseSSEChunk, parseSSEData } from '../interceptor/sse-parser';
 
 export const DEEPSEEK_OFFICIAL_API_URL = 'https://api.deepseek.com/chat/completions';
-const DEFAULT_MODEL = 'deepseek-v4-flash';
-const EXPERT_MODEL = 'deepseek-v4-pro';
 
 export interface OfficialDeepSeekMessage {
   role: 'user' | 'assistant';
   content: string;
+  reasoningContent?: string;
 }
 
 export interface OfficialDeepSeekTurn {
   assistantText: string;
+  reasoningText: string;
   finished: boolean;
 }
 
 export interface OfficialDeepSeekCallbacks {
   onTextChunk?(text: string, fullText: string): void;
+  onReasoningChunk?(text: string, fullText: string): void;
   onFinished?(): void;
 }
 
 export interface SubmitOfficialDeepSeekInput {
   apiKey: string;
-  modelType: ModelType;
+  config?: OfficialApiChatConfig;
   messages: OfficialDeepSeekMessage[];
   fetchImpl?: typeof fetch;
   endpoint?: string;
@@ -62,19 +67,22 @@ export async function submitOfficialDeepSeekStreaming(
   return readOfficialApiStream(response, callbacks);
 }
 
-export function createOfficialDeepSeekRequestBody(input: Pick<SubmitOfficialDeepSeekInput, 'modelType' | 'messages'>) {
-  const expert = input.modelType === 'expert';
+export function createOfficialDeepSeekRequestBody(input: Pick<SubmitOfficialDeepSeekInput, 'config' | 'messages'>) {
+  const config = normalizeOfficialApiChatConfig(input.config ?? DEFAULT_OFFICIAL_API_CHAT_CONFIG);
   return {
-    model: expert ? EXPERT_MODEL : DEFAULT_MODEL,
+    model: config.model,
     messages: input.messages.map((message) => ({
       role: message.role,
       content: message.content,
+      ...(config.thinking === 'enabled' && message.reasoningContent
+        ? { reasoning_content: message.reasoningContent }
+        : {}),
     })),
     stream: true,
     thinking: {
-      type: expert ? 'enabled' : 'disabled',
+      type: config.thinking,
     },
-    ...(expert ? { reasoning_effort: 'high' } : {}),
+    ...(config.thinking === 'enabled' ? { reasoning_effort: config.reasoningEffort } : {}),
   };
 }
 
@@ -85,7 +93,7 @@ async function readOfficialApiStream(
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  const turn: OfficialDeepSeekTurn = { assistantText: '', finished: false };
+  const turn: OfficialDeepSeekTurn = { assistantText: '', reasoningText: '', finished: false };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -121,6 +129,12 @@ function consumeOfficialApiSse(
     }
 
     const parsed = parseSSEData(event.data);
+    const newReasoningText = extractOfficialApiDeltaReasoningText(parsed);
+    if (newReasoningText) {
+      turn.reasoningText += newReasoningText;
+      callbacks.onReasoningChunk?.(newReasoningText, turn.reasoningText);
+    }
+
     const newText = extractOfficialApiDeltaText(parsed);
     if (newText) {
       turn.assistantText += newText;
@@ -131,6 +145,23 @@ function consumeOfficialApiSse(
       turn.finished = true;
     }
   }
+}
+
+function extractOfficialApiDeltaReasoningText(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return '';
+  const choices = (parsed as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) return '';
+
+  return choices
+    .map((choice) => {
+      if (!choice || typeof choice !== 'object') return '';
+      const delta = (choice as { delta?: unknown }).delta;
+      if (!delta || typeof delta !== 'object') return '';
+      const content = (delta as { reasoning_content?: unknown; thinking_content?: unknown }).reasoning_content ??
+        (delta as { thinking_content?: unknown }).thinking_content;
+      return typeof content === 'string' ? content : '';
+    })
+    .join('');
 }
 
 function extractOfficialApiDeltaText(parsed: unknown): string {

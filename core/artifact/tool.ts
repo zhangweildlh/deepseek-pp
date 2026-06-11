@@ -1,7 +1,7 @@
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
 import type { JsonValue, ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../tool/types';
 import { saveArtifact } from './store';
-import type { ArtifactFile, ArtifactOutput } from './types';
+import type { ArtifactFile, ArtifactOutput, ArtifactPreviewMode, ArtifactRuntimeLanguage, ArtifactView } from './types';
 import { bytesToBase64, createStoredZip } from './zip';
 
 export const ARTIFACT_TOOL_PROVIDER: ToolProviderIdentity = {
@@ -34,6 +34,16 @@ export function createArtifactToolDescriptors(_locale: SupportedLocale = DEFAULT
           filename: { type: 'string', description: translate(_locale, 'tool.artifact.filenameDescription') },
           content: { type: 'string', description: translate(_locale, 'tool.artifact.contentDescription') },
           mimeType: { type: 'string', description: translate(_locale, 'tool.artifact.mimeTypeDescription') },
+          previewMode: {
+            type: 'string',
+            enum: ['auto', 'none', 'html', 'code'],
+            description: translate(_locale, 'tool.artifact.previewModeDescription'),
+          },
+          language: {
+            type: 'string',
+            enum: ['html', 'javascript', 'typescript', 'python', 'text'],
+            description: translate(_locale, 'tool.artifact.languageDescription'),
+          },
         },
         required: ['filename', 'content'],
         additionalProperties: false,
@@ -103,7 +113,8 @@ async function createSingleFile(call: ToolCall, locale: SupportedLocale): Promis
   const filename = safeFilename(call.payload.filename, 'artifact.txt');
   const content = requiredString(call.payload.content, 'content');
   const mimeType = optionalString(call.payload.mimeType) || inferMimeType(filename);
-  const record = await saveArtifact({ kind: 'file', filename, mimeType, content });
+  const view = normalizeArtifactView(call.payload, filename, mimeType);
+  const record = await saveArtifact({ kind: 'file', filename, mimeType, content, view });
   const output: ArtifactOutput = {
     kind: 'artifact',
     artifactId: record.id,
@@ -111,6 +122,7 @@ async function createSingleFile(call: ToolCall, locale: SupportedLocale): Promis
     filename,
     mimeType,
     sizeBytes: record.sizeBytes,
+    view,
   };
   return {
     ok: true,
@@ -177,6 +189,38 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function normalizeArtifactView(payload: Record<string, unknown>, filename: string, mimeType: string): ArtifactView {
+  const language = normalizeArtifactLanguage(payload.language, filename, mimeType);
+  const previewMode = normalizeArtifactPreviewMode(payload.previewMode, language);
+  return { previewMode, language };
+}
+
+function normalizeArtifactPreviewMode(value: unknown, language: ArtifactRuntimeLanguage): ArtifactPreviewMode {
+  if (value === 'none' || value === 'html' || value === 'code') return value;
+  if (value !== undefined && value !== 'auto') {
+    throw new Error('previewMode must be auto, none, html, or code');
+  }
+  if (language === 'html') return 'html';
+  if (language === 'javascript' || language === 'typescript' || language === 'python') return 'code';
+  return 'none';
+}
+
+function normalizeArtifactLanguage(value: unknown, filename: string, mimeType: string): ArtifactRuntimeLanguage {
+  if (value === 'html' || value === 'javascript' || value === 'typescript' || value === 'python' || value === 'text') return value;
+  if (value !== undefined) throw new Error('language must be html, javascript, typescript, python, or text');
+  return inferArtifactLanguage(filename, mimeType);
+}
+
+function inferArtifactLanguage(filename: string, mimeType: string): ArtifactRuntimeLanguage {
+  const lower = filename.toLowerCase();
+  const normalizedMimeType = mimeType.toLowerCase();
+  if (normalizedMimeType.includes('html') || lower.endsWith('.html') || lower.endsWith('.htm')) return 'html';
+  if (normalizedMimeType.includes('javascript') || lower.endsWith('.js') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) return 'javascript';
+  if (lower.endsWith('.ts')) return 'typescript';
+  if (normalizedMimeType.includes('python') || lower.endsWith('.py')) return 'python';
+  return 'text';
+}
+
 function safeFilename(value: unknown, fallback: string): string {
   const raw = typeof value === 'string' && value.trim() ? value.trim() : fallback;
   const normalized = raw.replace(/\\/g, '/').replace(/^\/+/, '').split('/')
@@ -196,6 +240,8 @@ function inferMimeType(filename: string): string {
   if (lower.endsWith('.html')) return 'text/html';
   if (lower.endsWith('.json')) return 'application/json';
   if (lower.endsWith('.css')) return 'text/css';
-  if (lower.endsWith('.js') || lower.endsWith('.ts')) return 'text/plain';
+  if (lower.endsWith('.js')) return 'text/javascript';
+  if (lower.endsWith('.ts')) return 'text/typescript';
+  if (lower.endsWith('.py')) return 'text/x-python';
   return 'text/plain';
 }

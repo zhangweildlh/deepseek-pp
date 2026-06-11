@@ -1,5 +1,4 @@
 export type {
-  SandboxApprovalOutput,
   SandboxExecutionResult,
   SandboxLanguage,
   SandboxRunRequest,
@@ -12,10 +11,6 @@ export {
   normalizeSandboxRunRequest,
   SANDBOX_TOOL_NAMES,
   SANDBOX_TOOL_PROVIDER,
+  type SandboxToolRuntime,
   type SandboxToolName,
 } from './tool';
-
-export {
-  canRunBrowserSandbox,
-  runBrowserSandbox,
-} from './browser-runner';

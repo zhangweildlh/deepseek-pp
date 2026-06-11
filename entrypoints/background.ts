@@ -89,12 +89,7 @@ import {
   getVoiceSettings,
   saveVoiceSettings,
 } from '../core/voice/settings';
-import type { SandboxRunRequest } from '../core/sandbox';
-import {
-  getDeveloperSettings,
-  saveDeveloperSettings,
-} from '../core/developer/settings';
-import { runApiPlayground } from '../core/developer/api-playground';
+import type { SandboxExecutionResult, SandboxRunRequest, SandboxToolRuntime } from '../core/sandbox';
 import { getCurrentBrowserExtensionEnvironment } from '../core/platform';
 import {
   createMcpServer,
@@ -117,6 +112,12 @@ import {
   hasDeepSeekApiKey,
   saveDeepSeekApiKey,
 } from '../core/chat/api-key';
+import {
+  getOfficialApiChatConfig,
+  normalizeOfficialApiChatConfig,
+  saveOfficialApiChatConfig,
+  type OfficialApiChatConfig,
+} from '../core/chat/official-api-config';
 import {
   createAutomation,
   deleteAutomation,
@@ -165,7 +166,7 @@ import {
   watchLocalePreference,
 } from '../core/i18n/store';
 import type { WebSearchToolName } from '../core/tool/web-search';
-import type { BackgroundConfig, DeepSeekTheme, DeveloperSettings, GitHubSkillImportRequest, GitHubSkillSource, Memory, ModelType, NewMemory, PetConfig, ProjectContextState, SavedItemInput, Skill, SyncConfig, SyncCounts, SystemPromptPreset, ToolCall, ToolDescriptor, ToolExecutionRecord, ToolResult } from '../core/types';
+import type { BackgroundConfig, DeepSeekTheme, GitHubSkillImportRequest, GitHubSkillSource, Memory, ModelType, NewMemory, PetConfig, ProjectContextState, SavedItemInput, Skill, SyncConfig, SyncCounts, SystemPromptPreset, ToolCall, ToolDescriptor, ToolExecutionRecord, ToolExecutionTrigger, ToolResult } from '../core/types';
 import type { McpServerCreateInput, McpServerUpdateInput } from '../core/mcp/types';
 import type { AutomationCreateInput, AutomationRunnerRequest, AutomationRunnerResult, AutomationStatus, AutomationUpdateInput } from '../core/automation/types';
 import type { ConversationExportProgress, ConversationExportResult } from '../core/export/types';
@@ -179,6 +180,12 @@ let officialApiChatMessages: OfficialDeepSeekMessage[] = [];
 const conversationExportControllers = new Map<string, AbortController>();
 let currentBackgroundLocale: SupportedLocale = DEFAULT_LOCALE;
 let currentBackgroundTranslator = createTranslator(DEFAULT_LOCALE);
+let sandboxOffscreenCreation: Promise<void> | null = null;
+const SANDBOX_OFFSCREEN_URL = 'sandbox-offscreen.html';
+const SANDBOX_OFFSCREEN_PORT = 'sandbox-offscreen';
+const browserSandboxRuntime: SandboxToolRuntime = {
+  runSandbox: (request) => runBrowserSandboxToolResult(request),
+};
 
 function backgroundT(key: LocaleMessageKey, params?: MessageParams): string {
   return currentBackgroundTranslator.t(key, params);
@@ -572,15 +579,6 @@ async function handleMessage(
     case 'GET_VOICE_CAPABILITIES':
       return detectVoiceCapabilities();
 
-    case 'GET_DEVELOPER_SETTINGS':
-      return getDeveloperSettings();
-
-    case 'SAVE_DEVELOPER_SETTINGS': {
-      const settings = await saveDeveloperSettings(message.payload as Partial<DeveloperSettings>);
-      await broadcastDeveloperSettingsUpdate(sender.tab?.id);
-      return settings;
-    }
-
     case 'GET_MCP_SERVERS':
       return getAllMcpServers();
 
@@ -692,21 +690,6 @@ async function handleMessage(
       return diags;
     }
 
-    case 'RUN_DEEPSEEK_API_PLAYGROUND': {
-      const settings = await getDeveloperSettings();
-      if (!settings.developerMode || !settings.apiPlaygroundEnabled) {
-        return { ok: false, error: 'api_playground_disabled' };
-      }
-      const apiKey = await getDeepSeekApiKey();
-      if (!apiKey) return { ok: false, error: 'deepseek_api_key_missing' };
-      const { prompt, modelType } = message.payload as { prompt?: string; modelType?: ModelType };
-      return runApiPlayground({
-        apiKey,
-        prompt: prompt ?? '',
-        modelType: modelType ?? await getModelType(),
-      });
-    }
-
     case 'REQUEST_HOST_PERMISSION': {
       const { origins } = message.payload as { origins: string[] };
       if (!origins?.length) return { ok: false, error: 'no_origins' };
@@ -730,13 +713,13 @@ async function handleMessage(
 
     case 'EXECUTE_TOOL_CALL': {
       const call = message.payload as ToolCall;
-      const result = await executeRuntimeToolCall(call, call.source?.trigger ?? 'manual_chat', currentBackgroundLocale);
+      const result = await executeBackgroundRuntimeToolCall(call, call.source?.trigger ?? 'manual_chat');
       await broadcastToolCallHistoryUpdate(sender.tab?.id);
       return result;
     }
 
-    case 'RUN_APPROVED_SANDBOX':
-      return runApprovedSandbox(message.payload as SandboxRunRequest);
+    case 'RUN_ARTIFACT_CODE':
+      return runBrowserSandboxToolResult(message.payload as SandboxRunRequest);
 
     case 'GET_TOOL_CALL_HISTORY': {
       const { limit } = (message.payload as { limit?: number } | undefined) ?? {};
@@ -946,13 +929,13 @@ async function handleMessage(
     }
 
     case 'CHAT_SUBMIT_PROMPT': {
-      const { text } = message.payload as { text: string };
+      const { text, config } = message.payload as { text: string; config?: Partial<OfficialApiChatConfig> };
       if (!(await getChatEnabled())) {
         return { ok: false, error: 'chat_disabled' };
       }
       if (!text?.trim()) return { ok: false, error: 'empty_prompt' };
       // Fire and forget — the streaming response is broadcast
-      handleChatSubmitPrompt(text, sender.tab?.id).catch(() => {});
+      handleChatSubmitPrompt(text, config, sender.tab?.id).catch(() => {});
       return { ok: true };
     }
 
@@ -965,6 +948,12 @@ async function handleMessage(
     case 'GET_AUTH_STATUS': {
       return getChatAuthStatus(sender.tab?.id);
     }
+
+    case 'GET_OFFICIAL_API_CHAT_CONFIG':
+      return getOfficialApiChatConfig();
+
+    case 'SAVE_OFFICIAL_API_CHAT_CONFIG':
+      return saveOfficialApiChatConfig(message.payload);
 
     case 'EXPORT_DEEPSEEK_CONVERSATIONS':
       return handleConversationExport(message.payload, sender.tab?.id);
@@ -1150,11 +1139,6 @@ async function broadcastVoiceSettingsUpdate(excludeTabId?: number) {
   await broadcastToTabs({ type: 'VOICE_SETTINGS_UPDATED', voiceSettings }, excludeTabId);
 }
 
-async function broadcastDeveloperSettingsUpdate(excludeTabId?: number) {
-  const settings = await getDeveloperSettings();
-  await broadcastToTabs({ type: 'DEVELOPER_SETTINGS_UPDATED', settings }, excludeTabId);
-}
-
 async function broadcastAutomationUpdate(excludeTabId?: number) {
   const automations = await getAllAutomations();
   await broadcastToTabs({ type: 'AUTOMATIONS_UPDATED', automations }, excludeTabId);
@@ -1198,46 +1182,152 @@ async function broadcastConversationExportProgress(
   await broadcastToTabs({ type: 'DEEPSEEK_EXPORT_PROGRESS', progress }, excludeTabId);
 }
 
-async function runApprovedSandbox(request: SandboxRunRequest): Promise<ToolResult> {
-  if (request.language !== 'python') {
-    return {
-      ok: false,
-      summary: backgroundT('tool.sandbox.unsupportedApprovedLanguage'),
-      detail: request.language,
-      error: {
-        code: 'sandbox_language_not_background_executable',
-        message: `Use the browser sandbox card to run ${request.language}.`,
-        retryable: false,
-      },
-    };
-  }
+async function executeBackgroundRuntimeToolCall(
+  call: ToolCall,
+  source: ToolExecutionTrigger,
+): Promise<ToolResult> {
+  return executeRuntimeToolCall(call, source, currentBackgroundLocale);
+}
 
-  const descriptors = await getRuntimeToolDescriptors(currentBackgroundLocale);
-  const descriptor = descriptors.find((tool) => tool.name === 'python_exec');
-  if (!descriptor) {
-    return {
-      ok: false,
-      summary: backgroundT('tool.sandbox.pythonUnavailable'),
-      detail: backgroundT('tool.sandbox.pythonUnavailableDetail'),
-      error: {
-        code: 'python_exec_unavailable',
-        message: 'python_exec is not enabled or not available.',
-        retryable: false,
-      },
-    };
-  }
+async function runBrowserSandboxToolResult(request: SandboxRunRequest): Promise<ToolResult> {
+  const startedAt = Date.now();
+  const result = await requestOffscreenSandboxRun(request);
+  const completedAt = Date.now();
+  const detail = result.ok
+    ? result.result || result.stdout || ''
+    : result.stderr || result.error || backgroundT('tool.sandbox.failed');
 
-  return executeRuntimeToolCall({
-    name: descriptor.name,
-    invocationName: descriptor.invocationName,
-    descriptorId: descriptor.id,
-    provider: descriptor.provider,
-    payload: {
-      code: request.code,
-      timeout_ms: request.timeoutMs,
+  return {
+    ok: result.ok,
+    summary: result.ok ? backgroundT('tool.sandbox.executed') : backgroundT('tool.sandbox.failed'),
+    detail,
+    output: sandboxExecutionResultToJson(result),
+    error: result.ok ? undefined : {
+      code: result.error || 'sandbox_execution_failed',
+      message: detail,
+      retryable: result.error === 'sandbox_timeout' || result.error === 'sandbox_frame_timeout',
     },
-    raw: '<sandbox-approved-python>',
-  }, 'manual_chat', currentBackgroundLocale);
+    startedAt,
+    completedAt,
+    durationMs: result.durationMs,
+    truncated: result.truncated,
+  };
+}
+
+async function requestOffscreenSandboxRun(request: SandboxRunRequest): Promise<SandboxExecutionResult> {
+  if (!chrome.offscreen?.createDocument || !chrome.offscreen?.hasDocument) {
+    return createSandboxFailure(
+      backgroundT('tool.sandbox.offscreenUnavailableDetail'),
+      'sandbox_offscreen_unavailable',
+    );
+  }
+
+  try {
+    await ensureSandboxOffscreenDocument();
+  } catch (error) {
+    return createSandboxFailure(
+      error instanceof Error ? error.message : String(error),
+      'sandbox_offscreen_create_failed',
+    );
+  }
+
+  return sendSandboxRunToOffscreen(request);
+}
+
+async function ensureSandboxOffscreenDocument(): Promise<void> {
+  if (await chrome.offscreen.hasDocument()) return;
+
+  if (!sandboxOffscreenCreation) {
+    sandboxOffscreenCreation = chrome.offscreen.createDocument({
+      url: SANDBOX_OFFSCREEN_URL,
+      reasons: [chrome.offscreen.Reason.IFRAME_SCRIPTING, chrome.offscreen.Reason.WORKERS],
+      justification: 'Run DeepSeek-requested JavaScript, TypeScript, Python, and HTML in an isolated extension sandbox instead of the DeepSeek page.',
+    }).finally(() => {
+      sandboxOffscreenCreation = null;
+    });
+  }
+
+  await sandboxOffscreenCreation;
+}
+
+function sendSandboxRunToOffscreen(request: SandboxRunRequest): Promise<SandboxExecutionResult> {
+  const requestId = crypto.randomUUID();
+  const timeoutMs = Math.max(2_000, request.timeoutMs + 2_000);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const port = chrome.runtime.connect({ name: SANDBOX_OFFSCREEN_PORT });
+    const settle = (result: SandboxExecutionResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { port.disconnect(); } catch {}
+      resolve(result);
+    };
+    const timeout = setTimeout(() => {
+      settle(createSandboxFailure('Sandbox offscreen document timed out.', 'sandbox_offscreen_timeout', timeoutMs));
+    }, timeoutMs);
+
+    port.onMessage.addListener((message: unknown) => {
+      const value = message && typeof message === 'object'
+        ? message as { type?: unknown; requestId?: unknown; result?: unknown }
+        : {};
+      if (value.type !== 'OFFSCREEN_SANDBOX_RESULT' || value.requestId !== requestId) return;
+      settle(normalizeSandboxExecutionResult(value.result));
+    });
+
+    port.onDisconnect.addListener(() => {
+      const lastError = chrome.runtime.lastError?.message;
+      if (settled) return;
+      settle(createSandboxFailure(lastError || 'Sandbox offscreen document disconnected.', 'sandbox_offscreen_disconnected'));
+    });
+
+    port.postMessage({
+      type: 'OFFSCREEN_SANDBOX_RUN',
+      requestId,
+      payload: request,
+    });
+  });
+}
+
+function normalizeSandboxExecutionResult(value: unknown): SandboxExecutionResult {
+  const result = value && typeof value === 'object' ? value as Partial<SandboxExecutionResult> : {};
+  return {
+    ok: result.ok === true,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+    result: typeof result.result === 'string' ? result.result : undefined,
+    html: typeof result.html === 'string' ? result.html : undefined,
+    previewText: typeof result.previewText === 'string' ? result.previewText : undefined,
+    durationMs: typeof result.durationMs === 'number' && Number.isFinite(result.durationMs) ? result.durationMs : 0,
+    truncated: result.truncated === true,
+    error: typeof result.error === 'string' ? result.error : undefined,
+  };
+}
+
+function createSandboxFailure(message: string, code: string, durationMs = 0): SandboxExecutionResult {
+  return {
+    ok: false,
+    stdout: '',
+    stderr: message,
+    durationMs,
+    truncated: false,
+    error: code,
+  };
+}
+
+function sandboxExecutionResultToJson(result: SandboxExecutionResult): Record<string, string | number | boolean> {
+  return {
+    ok: result.ok,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    result: result.result ?? '',
+    html: result.html ?? '',
+    previewText: result.previewText ?? '',
+    durationMs: result.durationMs,
+    truncated: result.truncated,
+    error: result.error ?? '',
+  };
 }
 
 async function handleConversationExport(
@@ -1368,7 +1458,7 @@ async function executeAutomationWithContext(
       toolDescriptors: enabledDescriptors,
     },
   }, {
-    executeToolCall: (call) => executeRuntimeToolCall(call, 'automation', currentBackgroundLocale),
+    executeToolCall: (call) => executeBackgroundRuntimeToolCall(call, 'automation'),
   });
 }
 
@@ -1491,10 +1581,17 @@ function getSyncCounts(snapshot: SyncDataSnapshot): SyncCounts {
   };
 }
 
-async function handleChatSubmitPrompt(prompt: string, excludeTabId?: number) {
+async function handleChatSubmitPrompt(
+  prompt: string,
+  configInput?: Partial<OfficialApiChatConfig>,
+  excludeTabId?: number,
+) {
   const apiKey = await getDeepSeekApiKey();
   if (apiKey) {
-    await handleOfficialApiChatSubmitPrompt(prompt, apiKey, excludeTabId);
+    const config = configInput
+      ? normalizeOfficialApiChatConfig(configInput)
+      : await getOfficialApiChatConfig();
+    await handleOfficialApiChatSubmitPrompt(prompt, apiKey, config, excludeTabId);
     return;
   }
 
@@ -1540,12 +1637,14 @@ async function handleWebChatSubmitPrompt(prompt: string, excludeTabId?: number) 
   }
 }
 
-async function handleOfficialApiChatSubmitPrompt(prompt: string, apiKey: string, excludeTabId?: number) {
+async function handleOfficialApiChatSubmitPrompt(
+  prompt: string,
+  apiKey: string,
+  config: OfficialApiChatConfig,
+  excludeTabId?: number,
+) {
   try {
-    const [modelType, promptContext] = await Promise.all([
-      getModelType(),
-      buildSidepanelPrompt(prompt),
-    ]);
+    const promptContext = await buildSidepanelPrompt(prompt);
 
     const initialMessages: OfficialDeepSeekMessage[] = [
       ...officialApiChatMessages,
@@ -1555,7 +1654,7 @@ async function handleOfficialApiChatSubmitPrompt(prompt: string, apiKey: string,
     officialApiChatMessages = await runOfficialApiToolLoop(
       {
         apiKey,
-        modelType,
+        config,
         messages: initialMessages,
       },
       promptContext.enabledDescriptors,
@@ -1602,7 +1701,7 @@ async function buildSidepanelPrompt(prompt: string): Promise<{
 async function runOfficialApiToolLoop(
   input: {
     apiKey: string;
-    modelType: ModelType;
+    config: OfficialApiChatConfig;
     messages: OfficialDeepSeekMessage[];
   },
   toolDescriptors: ToolDescriptor[],
@@ -1613,14 +1712,19 @@ async function runOfficialApiToolLoop(
 
   for (let step = 0; step < MAX_STEPS; step++) {
     let accumulated = '';
+    let reasoningAccumulated = '';
     const turn = await submitOfficialDeepSeekStreaming({
       apiKey: input.apiKey,
-      modelType: input.modelType,
+      config: input.config,
       messages: currentMessages,
     }, {
       onTextChunk(newText: string, fullText: string) {
         accumulated = fullText;
-        broadcastChatChunk({ text: newText, done: false }, excludeTabId);
+        broadcastChatChunk({ text: newText, done: false, phase: 'answer' }, excludeTabId);
+      },
+      onReasoningChunk(newText: string, fullText: string) {
+        reasoningAccumulated = fullText;
+        broadcastChatChunk({ text: '', reasoningText: newText, done: false, phase: 'reasoning' }, excludeTabId);
       },
     });
 
@@ -1631,7 +1735,14 @@ async function runOfficialApiToolLoop(
       return currentMessages;
     }
 
-    currentMessages = [...currentMessages, { role: 'assistant', content: fullText }];
+    currentMessages = [
+      ...currentMessages,
+      {
+        role: 'assistant',
+        content: fullText,
+        reasoningContent: reasoningAccumulated || turn.reasoningText || undefined,
+      },
+    ];
     const toolCalls = extractToolCalls(fullText, { descriptors: toolDescriptors });
 
     if (toolCalls.length === 0) {
@@ -1641,7 +1752,7 @@ async function runOfficialApiToolLoop(
 
     const execs: ToolExecutionRecord[] = [];
     for (const call of toolCalls) {
-      const result = await executeRuntimeToolCall(call, 'sidepanel_chat', currentBackgroundLocale);
+      const result = await executeBackgroundRuntimeToolCall(call, 'sidepanel_chat');
       execs.push({
         name: call.name,
         result: {
@@ -1717,7 +1828,7 @@ async function runSidepanelToolLoop(
 
     const execs: ToolExecutionRecord[] = [];
     for (const call of toolCalls) {
-      const result = await executeRuntimeToolCall(call, 'sidepanel_chat', currentBackgroundLocale);
+      const result = await executeBackgroundRuntimeToolCall(call, 'sidepanel_chat');
       execs.push({
         name: call.name,
         result: {
@@ -1751,7 +1862,13 @@ async function runSidepanelToolLoop(
 }
 
 function broadcastChatChunk(
-  chunk: { text: string; done: boolean; error?: string },
+  chunk: {
+    text: string;
+    done: boolean;
+    error?: string;
+    reasoningText?: string;
+    phase?: 'reasoning' | 'answer';
+  },
   excludeTabId?: number,
 ) {
   chrome.runtime.sendMessage({ type: 'CHAT_STREAM_CHUNK', ...chunk }).catch(() => {});

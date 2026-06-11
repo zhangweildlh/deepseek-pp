@@ -2,7 +2,10 @@ export type {
   ArtifactFile,
   ArtifactKind,
   ArtifactOutput,
+  ArtifactPreviewMode,
   ArtifactRecord,
+  ArtifactRuntimeLanguage,
+  ArtifactView,
 } from './types';
 
 export { ARTIFACT_SCHEMA_VERSION } from './types';

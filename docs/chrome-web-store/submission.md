@@ -119,6 +119,12 @@ Adds right-click actions for selected page text so the user can send the selecti
 Connects to a user-configured local Native Messaging host for local MCP tools. The built-in Shell preset is disabled until the user installs the DeepSeek++ Shell host, configures it, and enables it.
 ```
 
+#### `offscreen`
+
+```text
+Creates an invisible extension document for isolated JavaScript, TypeScript, Python, and HTML sandbox runs. This keeps sandbox execution outside chat.deepseek.com so long-running or timed-out code cannot block the visible DeepSeek chat page.
+```
+
 #### `sidePanel`
 
 ```text

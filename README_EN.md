@@ -166,7 +166,6 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - **Saved-item reuse** - Snippets and bookmarks can be reused as prompt material across conversations.
 - **Voice input and read-aloud** - Use voice input and response read-aloud when the browser supports it; unsupported platforms show a clear status.
 - **Prompt switches** - Disable memory, system prompt, or preset injection per task, or force a response language.
-- **Developer playground** - In Developer mode, run one-off API tests while the API Key remains local and is never shown, synced, or exported.
 
 ### Floating Pet
 

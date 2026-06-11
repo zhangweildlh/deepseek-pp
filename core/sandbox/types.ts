@@ -1,4 +1,4 @@
-export type SandboxLanguage = 'javascript' | 'typescript' | 'python';
+export type SandboxLanguage = 'javascript' | 'typescript' | 'python' | 'html';
 
 export interface SandboxRunRequest {
   language: SandboxLanguage;
@@ -7,16 +7,13 @@ export interface SandboxRunRequest {
   timeoutMs: number;
 }
 
-export interface SandboxApprovalOutput extends SandboxRunRequest {
-  kind: 'sandbox_approval';
-  requestId: string;
-}
-
 export interface SandboxExecutionResult {
   ok: boolean;
   stdout: string;
   stderr: string;
   result?: string;
+  html?: string;
+  previewText?: string;
   durationMs: number;
   truncated: boolean;
   error?: string;

@@ -6,9 +6,13 @@ import {
 } from '../core/deepseek/official-api';
 
 describe('DeepSeek official API adapter', () => {
-  it('maps the side-panel model mode to current official model names', () => {
+  it('builds current official model and thinking request bodies', () => {
     expect(createOfficialDeepSeekRequestBody({
-      modelType: null,
+      config: {
+        model: 'deepseek-v4-flash',
+        thinking: 'disabled',
+        reasoningEffort: 'high',
+      },
       messages: [{ role: 'user', content: 'hello' }],
     })).toMatchObject({
       model: 'deepseek-v4-flash',
@@ -17,38 +21,52 @@ describe('DeepSeek official API adapter', () => {
     });
 
     expect(createOfficialDeepSeekRequestBody({
-      modelType: 'expert',
+      config: {
+        model: 'deepseek-v4-pro',
+        thinking: 'enabled',
+        reasoningEffort: 'max',
+      },
       messages: [{ role: 'user', content: 'hello' }],
     })).toMatchObject({
       model: 'deepseek-v4-pro',
       thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      reasoning_effort: 'max',
       stream: true,
     });
   });
 
-  it('streams OpenAI-compatible delta content and sends the configured API key', async () => {
+  it('streams OpenAI-compatible reasoning and answer deltas with the configured API key', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => createSseResponse([
+      'data: {"choices":[{"delta":{"reasoning_content":"Think"},"finish_reason":null}]}',
       'data: {"choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}',
       'data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}',
       'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}',
       'data: [DONE]',
     ].join('\n\n')));
     const chunks: string[] = [];
+    const reasoningChunks: string[] = [];
 
     const turn = await submitOfficialDeepSeekStreaming({
       apiKey: 'sk-test',
-      modelType: null,
+      config: {
+        model: 'deepseek-v4-flash',
+        thinking: 'enabled',
+        reasoningEffort: 'high',
+      },
       messages: [{ role: 'user', content: 'hello' }],
       fetchImpl,
     }, {
       onTextChunk(chunk) {
         chunks.push(chunk);
       },
+      onReasoningChunk(chunk) {
+        reasoningChunks.push(chunk);
+      },
     });
 
-    expect(turn).toEqual({ assistantText: 'Hello', finished: true });
+    expect(turn).toEqual({ assistantText: 'Hello', reasoningText: 'Think', finished: true });
     expect(chunks).toEqual(['Hel', 'lo']);
+    expect(reasoningChunks).toEqual(['Think']);
     expect(fetchImpl).toHaveBeenCalledWith(DEEPSEEK_OFFICIAL_API_URL, expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({
@@ -72,10 +90,43 @@ describe('DeepSeek official API adapter', () => {
 
     await expect(submitOfficialDeepSeekStreaming({
       apiKey: 'bad-key',
-      modelType: null,
       messages: [{ role: 'user', content: 'hello' }],
       fetchImpl,
     }, {})).rejects.toThrow('invalid api key');
+  });
+
+  it('passes reasoning content back for thinking tool loops', () => {
+    expect(createOfficialDeepSeekRequestBody({
+      config: {
+        model: 'deepseek-v4-pro',
+        thinking: 'enabled',
+        reasoningEffort: 'high',
+      },
+      messages: [
+        { role: 'assistant', content: 'final', reasoningContent: 'private trace' },
+        { role: 'user', content: 'next' },
+      ],
+    }).messages[0]).toMatchObject({
+      role: 'assistant',
+      content: 'final',
+      reasoning_content: 'private trace',
+    });
+  });
+
+  it('omits reasoning content when thinking is disabled', () => {
+    expect(createOfficialDeepSeekRequestBody({
+      config: {
+        model: 'deepseek-v4-flash',
+        thinking: 'disabled',
+        reasoningEffort: 'high',
+      },
+      messages: [
+        { role: 'assistant', content: 'final', reasoningContent: 'private trace' },
+      ],
+    }).messages[0]).toEqual({
+      role: 'assistant',
+      content: 'final',
+    });
   });
 });
 

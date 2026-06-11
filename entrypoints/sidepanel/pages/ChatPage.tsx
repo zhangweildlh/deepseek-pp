@@ -1,11 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
-import type { ChatMessage as ChatMessageType } from '../../../core/types';
+import { useEffect, useRef, useState } from 'react';
+import {
+  DEFAULT_OFFICIAL_API_CHAT_CONFIG,
+  normalizeOfficialApiChatConfig,
+  type OfficialApiChatConfig,
+  type OfficialDeepSeekModel,
+  type OfficialDeepSeekReasoningEffort,
+  type OfficialDeepSeekThinkingMode,
+} from '../../../core/chat/official-api-config';
 import {
   DEFAULT_VOICE_SETTINGS,
   detectVoiceCapabilities,
   normalizeVoiceSettings,
   type VoiceSettings,
 } from '../../../core/voice/settings';
+import type { ChatMessage as ChatMessageType } from '../../../core/types';
 import ChatMessage from '../components/ChatMessage';
 import { consumePendingText, onPendingText } from '../pending-text';
 import { useI18n } from '../i18n';
@@ -19,12 +27,33 @@ interface ChatAuthStatus {
   hasToken?: boolean;
 }
 
+interface ChatStreamMessage extends ChatAuthStatus {
+  type: string;
+  text?: string;
+  reasoningText?: string;
+  voiceSettings?: VoiceSettings;
+  phase?: 'reasoning' | 'answer';
+  done?: boolean;
+  error?: string;
+}
+
+const MODEL_OPTIONS: Array<{ value: OfficialDeepSeekModel; labelKey: 'sidepanel.chatPage.modelFlash' | 'sidepanel.chatPage.modelPro' }> = [
+  { value: 'deepseek-v4-flash', labelKey: 'sidepanel.chatPage.modelFlash' },
+  { value: 'deepseek-v4-pro', labelKey: 'sidepanel.chatPage.modelPro' },
+];
+
+const EFFORT_OPTIONS: Array<{ value: OfficialDeepSeekReasoningEffort; labelKey: 'sidepanel.chatPage.effortHigh' | 'sidepanel.chatPage.effortMax' }> = [
+  { value: 'high', labelKey: 'sidepanel.chatPage.effortHigh' },
+  { value: 'max', labelKey: 'sidepanel.chatPage.effortMax' },
+];
+
 export default function ChatPage() {
   const { t } = useI18n();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputText, setInputText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [authStatus, setAuthStatus] = useState<ChatAuthStatus | null>(null);
+  const [chatConfig, setChatConfig] = useState<OfficialApiChatConfig>(DEFAULT_OFFICIAL_API_CHAT_CONFIG);
   const [error, setError] = useState<string | null>(null);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
   const [isListening, setIsListening] = useState(false);
@@ -32,147 +61,212 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<ChatMessageType[]>([]);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceSettingsRef = useRef<VoiceSettings>(DEFAULT_VOICE_SETTINGS);
   const voiceCapabilities = detectVoiceCapabilities(window);
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  const apiControlsEnabled = authStatus?.provider === 'official-api';
 
-  // Consume pending text from right-click on mount + register live callback
+  function updateLastAssistant(update: (message: ChatMessageType) => ChatMessageType) {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'assistant') {
+        const next = [...prev.slice(0, -1), update(last)];
+        messagesRef.current = next;
+        return next;
+      }
+      const next = [...prev, update({ role: 'assistant', text: '' })];
+      messagesRef.current = next;
+      return next;
+    });
+  }
+
+  function appendAssistantText(text: string) {
+    updateLastAssistant((message) => ({
+      ...message,
+      text: message.text + text,
+    }));
+  }
+
+  function appendAssistantReasoning(reasoningText: string) {
+    updateLastAssistant((message) => ({
+      ...message,
+      reasoningText: `${message.reasoningText ?? ''}${reasoningText}`,
+    }));
+  }
+
   useEffect(() => {
     const text = consumePendingText();
     if (text) {
       setInputText(text);
       inputRef.current?.focus();
     }
-    return onPendingText((t) => {
-      setInputText(t);
+    return onPendingText((pendingText) => {
+      setInputText(pendingText);
       inputRef.current?.focus();
     });
   }, []);
 
-  // Check auth status on mount
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    voiceSettingsRef.current = voiceSettings;
+  }, [voiceSettings]);
+
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'GET_AUTH_STATUS' })
       .then((resp: ChatAuthStatus | undefined) => {
-        setAuthStatus({
-          available: resp?.available ?? resp?.hasToken ?? false,
-          provider: resp?.provider ?? (resp?.hasToken ? 'deepseek-web' : null),
-          hasApiKey: resp?.hasApiKey ?? false,
-          hasToken: resp?.hasToken ?? false,
-        });
+        setAuthStatus(normalizeAuthStatus(resp));
       })
       .catch(() => setAuthStatus({ available: false, provider: null, hasApiKey: false, hasToken: false }));
-  }, []);
 
-  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'GET_OFFICIAL_API_CHAT_CONFIG' })
+      .then((result) => setChatConfig(normalizeOfficialApiChatConfig(result)))
+      .catch(() => setChatConfig(DEFAULT_OFFICIAL_API_CHAT_CONFIG));
+
     chrome.runtime.sendMessage({ type: 'GET_VOICE_SETTINGS' })
       .then((result) => setVoiceSettings(normalizeVoiceSettings(result)))
       .catch(() => setVoiceSettings(DEFAULT_VOICE_SETTINGS));
-    const handler = (msg: { type?: string; voiceSettings?: VoiceSettings }) => {
-      if (msg.type === 'VOICE_SETTINGS_UPDATED') {
-        setVoiceSettings(normalizeVoiceSettings(msg.voiceSettings));
-      }
-    };
-    chrome.runtime.onMessage.addListener(handler);
-    return () => chrome.runtime.onMessage.removeListener(handler);
   }, []);
 
-  // Listen for streaming chunks and incoming text
   useEffect(() => {
-    const handler = (msg: { type: string; text?: string; done?: boolean; error?: string } & ChatAuthStatus) => {
+    const handler = (msg: ChatStreamMessage) => {
       if (msg.type === 'CHAT_SET_INPUT_TEXT' && typeof msg.text === 'string') {
         setInputText(msg.text);
         inputRef.current?.focus();
         return;
       }
+
       if (msg.type === 'AUTH_STATUS_CHANGED') {
-        setAuthStatus({
-          available: msg.available ?? msg.hasToken ?? false,
-          provider: msg.provider ?? (msg.hasToken ? 'deepseek-web' : null),
-          hasApiKey: msg.hasApiKey ?? false,
-          hasToken: msg.hasToken ?? false,
-        });
+        setAuthStatus(normalizeAuthStatus(msg));
         return;
       }
-      if (msg.type === 'CHAT_STREAM_CHUNK') {
-        if (msg.error) {
-          setError(msg.error);
-          setIsStreaming(false);
-          return;
+
+      if (msg.type === 'VOICE_SETTINGS_UPDATED') {
+        setVoiceSettings(normalizeVoiceSettings(msg.voiceSettings));
+        return;
+      }
+
+      if (msg.type !== 'CHAT_STREAM_CHUNK') return;
+
+      if (msg.error) {
+        setError(msg.error);
+        setIsStreaming(false);
+        return;
+      }
+
+      if (msg.done) {
+        setIsStreaming(false);
+        const currentVoiceSettings = voiceSettingsRef.current;
+        if (currentVoiceSettings.readAloudEnabled && voiceCapabilities.speechSynthesis) {
+          setTimeout(() => speakLatestAssistant(messagesRef.current, currentVoiceSettings), 0);
         }
-        if (msg.done) {
-          setIsStreaming(false);
-          if (voiceSettings.readAloudEnabled) {
-            setTimeout(() => speakLatestAssistant(messagesRef.current, voiceSettings), 0);
-          }
-          return;
-        }
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === 'assistant') {
-            return [...prev.slice(0, -1), { role: 'assistant', text: last.text + (msg.text ?? '') }];
-          }
-          return [...prev, { role: 'assistant', text: msg.text ?? '' }];
-        });
+        return;
+      }
+
+      if (msg.reasoningText) {
+        appendAssistantReasoning(msg.reasoningText);
+      }
+
+      if (msg.text) {
+        appendAssistantText(msg.text);
       }
     };
+
     chrome.runtime.onMessage.addListener(handler);
     return () => chrome.runtime.onMessage.removeListener(handler);
-  }, [voiceSettings]);
+  }, []);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
   }, [messages]);
 
+  const saveChatConfig = async (patch: Partial<OfficialApiChatConfig>) => {
+    const next = normalizeOfficialApiChatConfig({ ...chatConfig, ...patch });
+    setChatConfig(next);
+    try {
+      const saved = await chrome.runtime.sendMessage({ type: 'SAVE_OFFICIAL_API_CHAT_CONFIG', payload: next });
+      setChatConfig(normalizeOfficialApiChatConfig(saved));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const sendMessage = () => {
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
-    setMessages((prev) => [...prev, { role: 'user', text }]);
+    setMessages((prev) => {
+      const next = [...prev, { role: 'user' as const, text }];
+      messagesRef.current = next;
+      return next;
+    });
     setInputText('');
     setIsStreaming(true);
     setError(null);
 
-    chrome.runtime.sendMessage({ type: 'CHAT_SUBMIT_PROMPT', payload: { text } })
-      .catch((err: Error) => {
-        setError(err.message);
-        setIsStreaming(false);
-      });
+    chrome.runtime.sendMessage({
+      type: 'CHAT_SUBMIT_PROMPT',
+      payload: {
+        text,
+        ...(apiControlsEnabled ? { config: chatConfig } : {}),
+      },
+    }).catch((err: Error) => {
+      setError(err.message);
+      setIsStreaming(false);
+    });
   };
 
   const newSession = () => {
     chrome.runtime.sendMessage({ type: 'CHAT_NEW_SESSION' }).catch(() => {});
+    messagesRef.current = [];
     setMessages([]);
     setError(null);
     setIsStreaming(false);
+    stopVoiceInput();
     inputRef.current?.focus();
+  };
+
+  const handleModelChange = (model: OfficialDeepSeekModel) => {
+    if (!apiControlsEnabled || isStreaming) return;
+    void saveChatConfig({ model });
+  };
+
+  const handleThinkingChange = (thinking: OfficialDeepSeekThinkingMode) => {
+    if (!apiControlsEnabled || isStreaming) return;
+    void saveChatConfig({ thinking });
+  };
+
+  const handleEffortChange = (reasoningEffort: OfficialDeepSeekReasoningEffort) => {
+    if (!apiControlsEnabled || isStreaming || chatConfig.thinking !== 'enabled') return;
+    void saveChatConfig({ reasoningEffort });
   };
 
   const startVoiceInput = () => {
     const Recognition = getSpeechRecognitionConstructor();
     if (!Recognition || isListening) return;
+
     const recognition = new Recognition();
-    recognition.lang = 'zh-CN';
+    recognition.lang = navigator.language || 'zh-CN';
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
+      const transcript = Array.from(event.results as ArrayLike<SpeechRecognitionResultLike>)
         .map((result) => result[0]?.transcript ?? '')
         .join('')
         .trim();
       if (transcript) setInputText(transcript);
     };
     recognition.onend = () => {
-      setIsListening(false);
       recognitionRef.current = null;
+      setIsListening(false);
     };
     recognition.onerror = () => {
-      setIsListening(false);
       recognitionRef.current = null;
+      setIsListening(false);
     };
     recognitionRef.current = recognition;
     setIsListening(true);
@@ -181,6 +275,7 @@ export default function ChatPage() {
 
   const stopVoiceInput = () => {
     recognitionRef.current?.stop();
+    recognitionRef.current = null;
     setIsListening(false);
   };
 
@@ -193,7 +288,7 @@ export default function ChatPage() {
 
   if (authStatus?.available === false) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+      <div className="ds-chat-auth-empty">
         <p className="text-sm mb-3" style={{ color: 'var(--ds-text-secondary)' }}>
           {t('sidepanel.chatPage.authRequired')}
         </p>
@@ -205,48 +300,106 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 px-4 py-3" style={{ borderBottom: '1px solid var(--ds-border)' }}>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium" style={{ color: 'var(--ds-text)' }}>{t('sidepanel.chatPage.title')}</span>
-            {authStatus?.provider && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: 'var(--ds-text-tertiary)', background: 'var(--ds-surface)' }}>
-                {authStatus.provider === 'official-api' ? 'API' : 'Web'}
+    <div className="ds-chat-page">
+      <header className="ds-chat-header">
+        <div className="ds-chat-header-top">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold" style={{ color: 'var(--ds-text)' }}>
+                {t('sidepanel.chatPage.title')}
               </span>
-            )}
+              <ProviderBadge provider={authStatus?.provider ?? null} />
+            </div>
+            <p className="ds-chat-subtitle">
+              {apiControlsEnabled
+                ? t('sidepanel.chatPage.apiDescription')
+                : t('sidepanel.chatPage.webDescription')}
+            </p>
           </div>
-          <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--ds-text-secondary)' }}>
-            {t('sidepanel.chatPage.description')}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {voiceSettings.readAloudEnabled && voiceCapabilities.speechSynthesis && (
-            <button
-              onClick={() => speakLatestAssistant(messagesRef.current, voiceSettings)}
-              className="text-xs px-2.5 py-1 rounded-md"
-              style={{ color: 'var(--ds-text-tertiary)', background: 'var(--ds-surface)' }}
-              title={t('sidepanel.chatPage.readLatest')}
-            >
-              {t('sidepanel.chatPage.read')}
-            </button>
-          )}
-          <button
-            onClick={newSession}
-            className="text-xs px-2.5 py-1 rounded-md"
-            style={{ color: 'var(--ds-text-tertiary)', background: 'var(--ds-surface)' }}
-            title={t('sidepanel.chatPage.newSessionTitle')}
-          >
-            {t('sidepanel.chatPage.newSession')}
-          </button>
-        </div>
-      </div>
 
-      {/* Messages */}
-      <div ref={listRef} className="flex-1 overflow-y-auto p-3">
+          <div className="ds-chat-header-actions">
+            {voiceSettings.readAloudEnabled && voiceCapabilities.speechSynthesis && (
+              <button
+                type="button"
+                onClick={() => speakLatestAssistant(messagesRef.current, voiceSettings)}
+                className="ds-chat-text-button"
+                title={t('sidepanel.chatPage.readLatest')}
+              >
+                {t('sidepanel.chatPage.read')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={newSession}
+              className="ds-chat-icon-button"
+              title={t('sidepanel.chatPage.newSessionTitle')}
+              aria-label={t('sidepanel.chatPage.newSessionTitle')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {apiControlsEnabled && (
+          <div className="ds-chat-config-panel">
+            <div className="ds-chat-control-group" aria-label={t('sidepanel.chatPage.modelLabel')}>
+              {MODEL_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={isStreaming}
+                  onClick={() => handleModelChange(option.value)}
+                  className={`ds-chat-segment${chatConfig.model === option.value ? ' ds-chat-segment-active' : ''}`}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
+            </div>
+
+            <div className="ds-chat-control-row">
+              <div className="ds-chat-control-group" aria-label={t('sidepanel.chatPage.thinkingLabel')}>
+                <button
+                  type="button"
+                  disabled={isStreaming}
+                  onClick={() => handleThinkingChange('disabled')}
+                  className={`ds-chat-segment${chatConfig.thinking === 'disabled' ? ' ds-chat-segment-active' : ''}`}
+                >
+                  {t('sidepanel.chatPage.thinkingOff')}
+                </button>
+                <button
+                  type="button"
+                  disabled={isStreaming}
+                  onClick={() => handleThinkingChange('enabled')}
+                  className={`ds-chat-segment${chatConfig.thinking === 'enabled' ? ' ds-chat-segment-active' : ''}`}
+                >
+                  {t('sidepanel.chatPage.thinkingOn')}
+                </button>
+              </div>
+
+              <select
+                value={chatConfig.reasoningEffort}
+                disabled={isStreaming || chatConfig.thinking !== 'enabled'}
+                onChange={(e) => handleEffortChange(e.target.value as OfficialDeepSeekReasoningEffort)}
+                className="ds-chat-effort-select"
+                title={t('sidepanel.chatPage.effortLabel')}
+                aria-label={t('sidepanel.chatPage.effortLabel')}
+              >
+                {EFFORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+      </header>
+
+      <div ref={listRef} className="ds-chat-messages">
         {messages.length === 0 && !isStreaming && (
-          <div className="ds-empty-state h-full">
+          <div className="ds-chat-empty">
             <div className="ds-empty-state-icon">
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -256,61 +409,112 @@ export default function ChatPage() {
             <div className="ds-empty-state-description">{t('sidepanel.chatPage.emptyHelp')}</div>
           </div>
         )}
-        {messages.map((msg, i) => (
+
+        {messages.map((msg, index) => (
           <ChatMessage
-            key={i}
+            key={index}
             message={msg}
-            isStreaming={isStreaming && i === messages.length - 1 && msg.role === 'assistant'}
+            isStreaming={isStreaming && index === messages.length - 1 && msg.role === 'assistant'}
           />
         ))}
+
         {error && (
-          <div className="text-xs text-red-400 text-center mt-2">{error}</div>
+          <div className="ds-chat-error">{error}</div>
         )}
       </div>
 
-      {/* Input */}
-      <div className="p-3" style={{ borderTop: '1px solid var(--ds-border)' }}>
-        <div className="flex gap-2">
+      <footer className="ds-chat-composer-wrap">
+        <div className="ds-chat-composer">
           <textarea
             ref={inputRef}
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t('sidepanel.chatPage.inputPlaceholder')}
-            rows={2}
-            className="flex-1 resize-none rounded-lg px-3 py-2 text-sm outline-none"
-            style={{ background: 'var(--ds-surface)', color: 'var(--ds-text)', border: '1px solid var(--ds-border)' }}
+            rows={1}
+            className="ds-chat-input"
           />
-          {voiceSettings.inputEnabled && voiceCapabilities.speechRecognition && (
-            <button
-              onClick={isListening ? stopVoiceInput : startVoiceInput}
-              className="self-end px-3 py-2 rounded-lg text-sm font-medium"
-              style={{
-                background: isListening ? 'var(--ds-danger-bg)' : 'var(--ds-surface)',
-                color: isListening ? 'var(--ds-danger)' : 'var(--ds-text-secondary)',
-                border: '1px solid var(--ds-border)',
-              }}
-              title={isListening ? t('sidepanel.chatPage.stopListening') : t('sidepanel.chatPage.voiceInput')}
-            >
-              {isListening ? t('sidepanel.chatPage.stop') : t('sidepanel.chatPage.mic')}
-            </button>
-          )}
-          <button
-            onClick={sendMessage}
-            disabled={isStreaming || !inputText.trim()}
-            className="self-end px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-            style={{ background: 'var(--ds-accent)', color: '#fff' }}
-          >
-            {isStreaming ? '...' : t('sidepanel.chatPage.send')}
-          </button>
+          <div className="ds-chat-composer-actions">
+            <span className="ds-chat-current-config">
+              {apiControlsEnabled
+                ? getConfigLabel(chatConfig, t)
+                : t('sidepanel.chatPage.webProvider')}
+            </span>
+            <div className="ds-chat-composer-buttons">
+              {voiceSettings.inputEnabled && voiceCapabilities.speechRecognition && (
+                <button
+                  type="button"
+                  onClick={isListening ? stopVoiceInput : startVoiceInput}
+                  className={`ds-chat-mic-button${isListening ? ' ds-chat-mic-button-active' : ''}`}
+                  title={isListening ? t('sidepanel.chatPage.stopListening') : t('sidepanel.chatPage.voiceInput')}
+                  aria-label={isListening ? t('sidepanel.chatPage.stopListening') : t('sidepanel.chatPage.voiceInput')}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4a3 3 0 00-3 3v5a3 3 0 006 0V7a3 3 0 00-3-3z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 11a7 7 0 0014 0M12 18v3m-4 0h8" />
+                  </svg>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={sendMessage}
+                disabled={isStreaming || !inputText.trim()}
+                className="ds-chat-send-button"
+                title={t('sidepanel.chatPage.send')}
+                aria-label={t('sidepanel.chatPage.send')}
+              >
+                {isStreaming ? (
+                  <span className="ds-chat-send-dots" aria-hidden="true">...</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5m0 0-6 6m6-6 6 6" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      </footer>
     </div>
   );
 }
 
+function normalizeAuthStatus(resp: ChatAuthStatus | undefined): ChatAuthStatus {
+  return {
+    available: resp?.available ?? resp?.hasToken ?? false,
+    provider: resp?.provider ?? (resp?.hasToken ? 'deepseek-web' : null),
+    hasApiKey: resp?.hasApiKey ?? false,
+    hasToken: resp?.hasToken ?? false,
+  };
+}
+
+function ProviderBadge({ provider }: { provider: ChatProvider }) {
+  const { t } = useI18n();
+  if (!provider) return null;
+  const label = provider === 'official-api'
+    ? t('sidepanel.chatPage.apiProvider')
+    : t('sidepanel.chatPage.webProvider');
+  return <span className="ds-chat-provider-badge">{label}</span>;
+}
+
+function getConfigLabel(
+  config: OfficialApiChatConfig,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  const model = config.model === 'deepseek-v4-pro'
+    ? t('sidepanel.chatPage.modelPro')
+    : t('sidepanel.chatPage.modelFlash');
+  if (config.thinking !== 'enabled') {
+    return `${model} · ${t('sidepanel.chatPage.thinkingOff')}`;
+  }
+  const effort = config.reasoningEffort === 'max'
+    ? t('sidepanel.chatPage.effortMax')
+    : t('sidepanel.chatPage.effortHigh');
+  return `${model} · ${t('sidepanel.chatPage.thinkingOn')} · ${effort}`;
+}
+
 type SpeechRecognitionResultLike = {
-  readonly 0: { transcript: string };
+  readonly 0: { transcript?: string };
 };
 
 type SpeechRecognitionEventLike = {

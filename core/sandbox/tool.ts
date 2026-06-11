@@ -1,6 +1,6 @@
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
-import type { JsonValue, ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../tool/types';
-import type { SandboxApprovalOutput, SandboxLanguage, SandboxRunRequest } from './types';
+import type { ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../tool/types';
+import type { SandboxLanguage, SandboxRunRequest } from './types';
 
 export const SANDBOX_TOOL_PROVIDER: ToolProviderIdentity = {
   kind: 'local',
@@ -12,7 +12,12 @@ export const SANDBOX_TOOL_PROVIDER: ToolProviderIdentity = {
 export const SANDBOX_TOOL_NAMES = ['sandbox_run'] as const;
 export type SandboxToolName = typeof SANDBOX_TOOL_NAMES[number];
 
+export interface SandboxToolRuntime {
+  runSandbox(request: SandboxRunRequest): Promise<ToolResult>;
+}
+
 const DEFAULT_TIMEOUT_MS = 5_000;
+const PYTHON_DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_CODE_BYTES = 30_000;
 
 export function isSandboxToolName(name: string): name is SandboxToolName {
@@ -32,7 +37,7 @@ export function createSandboxToolDescriptors(locale: SupportedLocale = DEFAULT_L
       properties: {
         language: {
           type: 'string',
-          enum: ['javascript', 'typescript', 'python'],
+          enum: ['javascript', 'typescript', 'python', 'html'],
           description: translate(locale, 'tool.sandbox.languageDescription'),
         },
         code: { type: 'string', description: translate(locale, 'tool.sandbox.codeDescription') },
@@ -47,6 +52,7 @@ export function createSandboxToolDescriptors(locale: SupportedLocale = DEFAULT_L
 }
 
 export async function executeSandboxToolCall(
+  runtime: SandboxToolRuntime | null | undefined,
   call: ToolCall,
   locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<ToolResult> {
@@ -66,18 +72,26 @@ export async function executeSandboxToolCall(
 
   try {
     const request = normalizeSandboxRunRequest(call.payload);
-    const output: SandboxApprovalOutput = {
-      kind: 'sandbox_approval',
-      requestId: createRequestId(),
-      ...request,
-    };
+    if (!runtime) {
+      return {
+        ok: false,
+        name: call.name,
+        provider: call.provider ?? SANDBOX_TOOL_PROVIDER,
+        summary: translate(locale, 'tool.sandbox.offscreenUnavailable'),
+        detail: translate(locale, 'tool.sandbox.runtimeUnavailableDetail'),
+        error: {
+          code: 'sandbox_runtime_unavailable',
+          message: 'Browser sandbox runtime is unavailable in this context.',
+          retryable: false,
+        },
+      };
+    }
+    const result = await runtime.runSandbox(request);
     return {
-      ok: true,
-      name: call.name,
-      provider: call.provider ?? SANDBOX_TOOL_PROVIDER,
-      summary: translate(locale, 'tool.sandbox.approvalRequired'),
-      detail: translate(locale, 'tool.sandbox.approvalDetail'),
-      output: output as unknown as JsonValue,
+      ...result,
+      name: result.name ?? call.name,
+      provider: result.provider ?? call.provider ?? SANDBOX_TOOL_PROVIDER,
+      descriptorId: result.descriptorId ?? call.descriptorId,
     };
   } catch (error) {
     return {
@@ -109,13 +123,13 @@ export function normalizeSandboxRunRequest(value: unknown): SandboxRunRequest {
     language,
     code,
     input: typeof payload.input === 'string' ? payload.input : undefined,
-    timeoutMs: clampTimeout(payload.timeoutMs),
+    timeoutMs: clampTimeout(payload.timeoutMs, language),
   };
 }
 
 function normalizeLanguage(value: unknown): SandboxLanguage {
-  if (value === 'javascript' || value === 'typescript' || value === 'python') return value;
-  throw new Error('language must be javascript, typescript, or python');
+  if (value === 'javascript' || value === 'typescript' || value === 'python' || value === 'html') return value;
+  throw new Error('language must be javascript, typescript, python, or html');
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -125,13 +139,9 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function clampTimeout(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_TIMEOUT_MS;
+function clampTimeout(value: unknown, language: SandboxLanguage): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return language === 'python' ? PYTHON_DEFAULT_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  }
   return Math.min(15_000, Math.max(1_000, Math.floor(value)));
-}
-
-function createRequestId(): string {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `sandbox-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

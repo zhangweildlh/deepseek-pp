@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../entrypoints/sidepanel/App';
 import LibraryPage from '../entrypoints/sidepanel/pages/LibraryPage';
 import CapabilitiesPage from '../entrypoints/sidepanel/pages/CapabilitiesPage';
+import SettingsPage from '../entrypoints/sidepanel/pages/SettingsPage';
 
 let container: HTMLDivElement;
 let root: Root | null;
@@ -20,7 +21,6 @@ beforeEach(() => {
       getManifest: vi.fn(() => ({ version: '0.6.5' })),
       sendMessage: vi.fn(async (message: { type?: string }) => {
         if (message.type === 'GET_AUTH_STATUS') return { available: true, provider: 'deepseek-web' };
-        if (message.type === 'GET_DEVELOPER_SETTINGS') return { developerMode: false, apiPlaygroundEnabled: false };
         if (message.type === 'GET_VOICE_SETTINGS') return {};
         return null;
       }),
@@ -68,6 +68,14 @@ describe('sidepanel navigation', () => {
     unmountRoot();
     await renderElement(React.createElement(CapabilitiesPage));
     expect(navButtonLabels('能力子导航')).toEqual(['Skill', 'MCP', '工具', '预设', '自动化']);
+  });
+
+  it('keeps the voice settings surface reachable from Settings', async () => {
+    await renderElement(React.createElement(SettingsPage));
+
+    expect(container.textContent).toContain('语音');
+    expect(container.textContent).toContain('语音输入');
+    expect(container.textContent).toContain('朗读回复');
   });
 });
 

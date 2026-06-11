@@ -43,13 +43,36 @@ describe('artifact tool provider', () => {
 
     expect(result.ok).toBe(true);
     expect(result.summary).toBe('File ready');
-    const output = result.output as { artifactId: string; filename: string; artifactKind: string };
+    const output = result.output as { artifactId: string; filename: string; artifactKind: string; view?: { previewMode: string; language: string } };
     expect(output.filename).toBe('reports/summary.md');
     expect(output.artifactKind).toBe('file');
+    expect(output.view).toEqual({ previewMode: 'none', language: 'text' });
 
     const record = await getArtifact(output.artifactId);
     expect(record?.content).toBe('# Summary');
     expect(record?.mimeType).toBe('text/markdown');
+  });
+
+  it('marks HTML and Python artifacts as previewable or runnable files', async () => {
+    const html = await executeArtifactToolCall(toolCall('artifact_create', {
+      filename: 'demo.html',
+      content: '<!doctype html><h1>Hello</h1>',
+    }), 'en');
+    const python = await executeArtifactToolCall(toolCall('artifact_create', {
+      filename: 'calc.py',
+      content: 'print(21 * 2)',
+    }), 'en');
+
+    expect(html.output).toMatchObject({
+      filename: 'demo.html',
+      mimeType: 'text/html',
+      view: { previewMode: 'html', language: 'html' },
+    });
+    expect(python.output).toMatchObject({
+      filename: 'calc.py',
+      mimeType: 'text/x-python',
+      view: { previewMode: 'code', language: 'python' },
+    });
   });
 
   it('creates a stored zip bundle for multi-file project output', async () => {

@@ -8,12 +8,14 @@ import type {
   ProjectContextState,
   ProjectFileInput,
 } from './project/types';
-import type { DeveloperSettings as DeveloperSettingsType } from './developer/settings';
 import type { PromptInjectionSettings as PromptInjectionSettingsType } from './prompt/settings';
 import type { SandboxRunRequest as SandboxRunRequestType } from './sandbox/types';
 import type {
   SavedItemInput,
 } from './saved-items/types';
+import type {
+  OfficialApiChatConfig as OfficialApiChatConfigType,
+} from './chat/official-api-config';
 import type { VoiceSettings as VoiceSettingsType } from './voice/settings';
 import type {
   ToolCall as GenericToolCall,
@@ -82,12 +84,11 @@ export type {
   ArtifactFile,
   ArtifactKind,
   ArtifactOutput,
+  ArtifactPreviewMode,
   ArtifactRecord,
+  ArtifactRuntimeLanguage,
+  ArtifactView,
 } from './artifact/types';
-
-export type {
-  DeveloperSettings,
-} from './developer/settings';
 
 export type {
   PromptInjectionSettings,
@@ -103,12 +104,18 @@ export type {
 } from './saved-items/types';
 
 export type {
+  OfficialApiChatConfig,
+  OfficialDeepSeekModel,
+  OfficialDeepSeekReasoningEffort,
+  OfficialDeepSeekThinkingMode,
+} from './chat/official-api-config';
+
+export type {
   VoiceCapabilityState,
   VoiceSettings,
 } from './voice/settings';
 
 export type {
-  SandboxApprovalOutput,
   SandboxExecutionResult,
   SandboxLanguage,
   SandboxRunRequest,
@@ -395,9 +402,6 @@ export type MessageAction =
   | { type: 'GET_VOICE_SETTINGS' }
   | { type: 'SAVE_VOICE_SETTINGS'; payload: Partial<VoiceSettingsType> }
   | { type: 'GET_VOICE_CAPABILITIES' }
-  | { type: 'GET_DEVELOPER_SETTINGS' }
-  | { type: 'SAVE_DEVELOPER_SETTINGS'; payload: Partial<DeveloperSettingsType> }
-  | { type: 'RUN_DEEPSEEK_API_PLAYGROUND'; payload: { prompt: string; modelType?: ModelType } }
   | { type: 'GET_MCP_SERVERS' }
   | { type: 'GET_MCP_SERVER'; payload: { id: McpServerId } }
   | { type: 'CREATE_MCP_SERVER'; payload: McpServerCreateInput }
@@ -408,7 +412,7 @@ export type MessageAction =
   | { type: 'GET_TOOL_DESCRIPTORS' }
   | { type: 'REFRESH_TOOL_DESCRIPTORS' }
   | { type: 'EXECUTE_TOOL_CALL'; payload: ToolCall }
-  | { type: 'RUN_APPROVED_SANDBOX'; payload: SandboxRunRequestType }
+  | { type: 'RUN_ARTIFACT_CODE'; payload: SandboxRunRequestType }
   | { type: 'GET_TOOL_CALL_HISTORY'; payload?: { limit?: number } }
   | { type: 'CLEAR_TOOL_CALL_HISTORY' }
   | { type: 'GET_PLATFORM_CAPABILITIES' }
@@ -426,6 +430,8 @@ export type MessageAction =
   | { type: 'SET_DEEPSEEK_THEME'; payload: { theme: DeepSeekTheme } }
   | { type: 'GET_MODEL_TYPE' }
   | { type: 'SET_MODEL_TYPE'; payload: ModelType }
+  | { type: 'GET_OFFICIAL_API_CHAT_CONFIG' }
+  | { type: 'SAVE_OFFICIAL_API_CHAT_CONFIG'; payload: Partial<OfficialApiChatConfigType> }
   | { type: 'TOOL_CALL_EXECUTED'; payload: ToolCall }
   | { type: 'MEMORIES_UPDATED' }
   | { type: 'WEBDAV_TEST'; payload: Omit<SyncConfig, 'lastSyncAt'> }
@@ -456,9 +462,12 @@ export interface ScenarioConfig {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
+  reasoningText?: string;
 }
 
 export interface ChatStreamChunk {
   text: string;
   done: boolean;
+  reasoningText?: string;
+  phase?: 'reasoning' | 'answer';
 }

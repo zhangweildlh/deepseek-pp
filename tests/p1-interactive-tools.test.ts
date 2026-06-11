@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { previewMemoryImport } from '../core/memory/importer';
 import {
+  createArtifactToolDescriptors,
   createMemoryImportToolDescriptors,
   createMemoryToolDescriptors,
-  createSandboxToolDescriptors,
   createSkillCreatorToolDescriptors,
   createSkillDraft,
+} from '../core/tool';
+import {
+  createSandboxToolDescriptors,
   executeSandboxToolCall,
   normalizeSandboxRunRequest,
-} from '../core/tool';
+} from '../core/sandbox';
 import { filterSidepanelChatToolDescriptors } from '../core/tool/sidepanel';
 import {
   getPromptInjectionSettings,
@@ -47,24 +50,50 @@ afterEach(() => {
 });
 
 describe('P1 interactive tool contracts', () => {
-  it('returns a sandbox approval card instead of executing code immediately', async () => {
+  it('executes sandbox calls through the injected browser runtime', async () => {
     const descriptor = createSandboxToolDescriptors('en')[0];
+    expect(descriptor.execution.mode).toBe('auto');
     expect(descriptor.execution.risk).toBe('high');
 
-    const result = await executeSandboxToolCall(toolCall('sandbox_run', {
+    const seenRequests: unknown[] = [];
+    const result = await executeSandboxToolCall({
+      async runSandbox(request) {
+        seenRequests.push(request);
+        return {
+          ok: true,
+          summary: 'Sandbox executed',
+          detail: '42',
+          output: {
+            ok: true,
+            stdout: '',
+            stderr: '',
+            result: '42',
+            durationMs: 7,
+            truncated: false,
+            error: '',
+          },
+        };
+      },
+    }, toolCall('sandbox_run', {
       language: 'javascript',
       code: 'return 42;',
       timeoutMs: 500,
     }), 'en');
 
     expect(result.ok).toBe(true);
-    expect(result.summary).toBe('Review required');
+    expect(result.summary).toBe('Sandbox executed');
+    expect(result.detail).toBe('42');
+    expect(result.name).toBe('sandbox_run');
     expect(result.output).toMatchObject({
-      kind: 'sandbox_approval',
+      ok: true,
+      result: '42',
+    });
+    expect(seenRequests).toEqual([{
       language: 'javascript',
       code: 'return 42;',
+      input: undefined,
       timeoutMs: 1000,
-    });
+    }]);
   });
 
   it('normalizes sandbox requests with explicit size and timeout boundaries', () => {
@@ -73,17 +102,25 @@ describe('P1 interactive tool contracts', () => {
       code: 'const answer: number = 42;',
       timeoutMs: 60_000,
     }).timeoutMs).toBe(15_000);
+    expect(normalizeSandboxRunRequest({
+      language: 'python',
+      code: 'print(42)',
+    }).timeoutMs).toBe(15_000);
+    expect(normalizeSandboxRunRequest({
+      language: 'html',
+      code: '<h1>Hello</h1>',
+    }).language).toBe('html');
 
     expect(() => normalizeSandboxRunRequest({
       language: 'ruby',
       code: 'puts 1',
-    })).toThrow('language must be javascript, typescript, or python');
+    })).toThrow('language must be javascript, typescript, python, or html');
   });
 
-  it('keeps approval-card tools out of sidepanel chat descriptors', () => {
+  it('keeps review-card tools out of sidepanel chat descriptors while artifact handles runnable outputs', () => {
     const descriptors = [
       ...createMemoryToolDescriptors('en'),
-      ...createSandboxToolDescriptors('en'),
+      ...createArtifactToolDescriptors('en'),
       ...createSkillCreatorToolDescriptors('en'),
       ...createMemoryImportToolDescriptors('en'),
     ];
@@ -92,6 +129,7 @@ describe('P1 interactive tool contracts', () => {
       .map((descriptor) => descriptor.name);
 
     expect(sidepanelNames).toContain('memory_save');
+    expect(sidepanelNames).toContain('artifact_create');
     expect(sidepanelNames).not.toContain('sandbox_run');
     expect(sidepanelNames).not.toContain('skill_draft_create');
     expect(sidepanelNames).not.toContain('memory_import_preview');

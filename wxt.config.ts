@@ -12,6 +12,22 @@ const extensionVersion = readPackageVersion();
 const MANIFEST_NAME = '__MSG_extension_name__';
 const MANIFEST_DESCRIPTION = '__MSG_extension_description__';
 const MANIFEST_ACTION_TITLE = '__MSG_extension_action_title__';
+const SANDBOX_CSP = [
+  'sandbox allow-scripts',
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:",
+  'worker-src blob:',
+  "child-src 'self' blob: data:",
+  "frame-src 'self' blob: data:",
+  "connect-src 'self' blob:",
+  "object-src 'none'",
+].join('; ');
+const PYODIDE_ASSET_FILES = [
+  'pyodide.mjs',
+  'pyodide.asm.mjs',
+  'pyodide.asm.wasm',
+  'python_stdlib.zip',
+  'pyodide-lock.json',
+];
 
 function readPackageVersion(): string {
   const packageJson = JSON.parse(
@@ -29,17 +45,22 @@ function createManifest(env: ConfigEnv): UserManifest {
   const isFirefox = env.browser === 'firefox';
   const isChromiumTarget = CHROMIUM_BROWSERS.has(env.browser);
   const permissions = ['storage', 'alarms', 'nativeMessaging', 'contextMenus'];
+  const chromiumPermissions = [...permissions, 'offscreen'];
 
   return {
     default_locale: 'en',
     name: MANIFEST_NAME,
     description: MANIFEST_DESCRIPTION,
     version: extensionVersion,
-    permissions: isChromiumTarget ? [...permissions, 'sidePanel'] : permissions,
+    permissions: isChromiumTarget ? [...chromiumPermissions, 'sidePanel'] : permissions,
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     host_permissions: ['*://chat.deepseek.com/*', 'https://api.deepseek.com/*', '*://cn.bing.com/*', '*://www.bing.com/*'],
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+      sandbox: SANDBOX_CSP,
+    },
+    sandbox: {
+      pages: ['sandbox-runner.html'],
     },
     web_accessible_resources: [{
       resources: ['pet/*.png', 'deepseek/*.wasm'],
@@ -87,6 +108,23 @@ function asciiJavaScriptOutputPlugin(): Plugin {
   };
 }
 
+function pyodideAssetsPlugin(): Plugin {
+  return {
+    name: 'deepseek-pp-pyodide-assets',
+    apply: 'build',
+    generateBundle() {
+      const pyodideDir = resolve(rootDir, 'node_modules/pyodide');
+      for (const file of PYODIDE_ASSET_FILES) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `pyodide/${file}`,
+          source: readFileSync(resolve(pyodideDir, file)),
+        });
+      }
+    },
+  };
+}
+
 function escapeNonAsciiJavaScript(source: string): string {
   let escaped = '';
   for (const char of source) {
@@ -115,7 +153,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: createManifest,
   vite: () => ({
-    plugins: [tailwindcss(), asciiJavaScriptOutputPlugin()],
+    plugins: [tailwindcss(), pyodideAssetsPlugin(), asciiJavaScriptOutputPlugin()],
     resolve: {
       alias: {
         '@wxt-dev/browser': safeWxtBrowser,

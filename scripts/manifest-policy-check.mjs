@@ -10,12 +10,12 @@ const targets = [
   {
     browser: 'chrome',
     manifestPath: 'dist/chrome-mv3/manifest.json',
-    permissions: ['storage', 'alarms', 'nativeMessaging', 'contextMenus', 'sidePanel'],
+    permissions: ['storage', 'alarms', 'nativeMessaging', 'contextMenus', 'offscreen', 'sidePanel'],
   },
   {
     browser: 'edge',
     manifestPath: 'dist/edge-mv3/manifest.json',
-    permissions: ['storage', 'alarms', 'nativeMessaging', 'contextMenus', 'sidePanel'],
+    permissions: ['storage', 'alarms', 'nativeMessaging', 'contextMenus', 'offscreen', 'sidePanel'],
   },
   {
     browser: 'firefox',
@@ -64,6 +64,19 @@ for (const target of targets) {
   const webResources = manifest.web_accessible_resources?.flatMap((entry) => entry.resources ?? []) ?? [];
   assert(webResources.includes('pet/*.png'), `${target.browser}: pet assets must be web accessible`);
   assert(webResources.includes('deepseek/*.wasm'), `${target.browser}: DeepSeek wasm must be web accessible`);
+  assert(manifest.sandbox?.pages?.includes('sandbox-runner.html'), `${target.browser}: sandbox runner page must be declared`);
+  assertIncludes(
+    manifest.content_security_policy?.sandbox ?? '',
+    "'unsafe-inline'",
+    `${target.browser}: sandbox CSP must allow inline scripts for srcdoc HTML execution`,
+  );
+  assert(
+    !(manifest.content_security_policy?.extension_pages ?? '').includes("'unsafe-inline'"),
+    `${target.browser}: extension_pages CSP must not allow inline scripts`,
+  );
+  assertFileExists(target.manifestPath.replace('manifest.json', 'pyodide/pyodide.mjs'), `${target.browser}: Pyodide module asset must be bundled`);
+  assertFileExists(target.manifestPath.replace('manifest.json', 'pyodide/pyodide.asm.wasm'), `${target.browser}: Pyodide wasm asset must be bundled`);
+  assertFileExists(target.manifestPath.replace('manifest.json', 'pyodide/python_stdlib.zip'), `${target.browser}: Pyodide stdlib asset must be bundled`);
 }
 
 const background = readText('entrypoints/background.ts');
@@ -77,14 +90,16 @@ assertIncludes(background, 'chrome.alarms.onAlarm.addListener', 'alarms permissi
 assertIncludes(nativeTransport, 'chrome.runtime.connectNative', 'nativeMessaging permission must use connectNative');
 assertIncludes(background, 'chrome.contextMenus.create', 'contextMenus permission must create menu items');
 assertIncludes(background, 'chrome.contextMenus.onClicked.addListener', 'contextMenus permission must handle clicks');
+assertIncludes(background, 'chrome.offscreen.createDocument', 'offscreen permission must create an offscreen document');
 assertIncludes(background, 'chrome.sidePanel', 'sidePanel permission must use the side panel API');
 assertIncludes(wxtConfig, 'web_accessible_resources', 'web accessible resources must be declared in manifest config');
 assertIncludes(wxtConfig, "default_locale: 'en'", 'manifest config must declare default locale');
 assertIncludes(wxtConfig, '__MSG_extension_name__', 'manifest config must use localized name');
 assertIncludes(wxtConfig, '__MSG_extension_description__', 'manifest config must use localized description');
 assertIncludes(wxtConfig, '__MSG_extension_action_title__', 'manifest config must use localized action title');
+assertIncludes(wxtConfig, 'pyodideAssetsPlugin', 'manifest build must bundle Pyodide assets for browser Python sandbox');
 
-for (const permission of ['storage', 'alarms', 'contextMenus', 'nativeMessaging', 'sidePanel']) {
+for (const permission of ['storage', 'alarms', 'contextMenus', 'nativeMessaging', 'offscreen', 'sidePanel']) {
   assertIncludes(privacyPolicy, `\`${permission}\``, `privacy policy must document ${permission}`);
   assertIncludes(submission, `#### \`${permission}\``, `Chrome Web Store submission notes must justify ${permission}`);
 }
@@ -103,6 +118,14 @@ function readJson(relativePath, missingHint) {
   } catch (error) {
     failures.push(`${relativePath}: ${error.message}${missingHint ? ` ${missingHint}` : ''}`);
     return null;
+  }
+}
+
+function assertFileExists(relativePath, message) {
+  try {
+    readFileSync(resolve(root, relativePath));
+  } catch {
+    failures.push(message);
   }
 }
 

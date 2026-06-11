@@ -55,7 +55,7 @@
 | T3.3 | #165 | Implement Android bridge for storage, downloads, file/folder picking, theme, and locale | implemented locally |
 | T3.4 | #166 | Add Android capability gating for native messaging, Shell, sidePanel-only UI, and unsupported browser APIs | implemented locally |
 | T3.5 | #167 | Add Android test/CI documentation and smoke commands | open |
-| T4.1 | #168 | Add user-approved browser sandbox code runner for JS/TS/Python where available | implemented locally |
+| T4.1 | #168 | Add isolated browser sandbox code runner for JS/TS/Python/HTML where available | implemented locally |
 | T4.2 | #169 | Add optional voice input and response read-aloud | implemented locally |
 | T4.3 | #170 | Add AI-assisted Skill creator tool with review-before-save | implemented locally |
 | T4.4 | #171 | Add memory import from another AI workflow | implemented locally |

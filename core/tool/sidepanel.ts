@@ -1,10 +1,8 @@
 import { MEMORY_IMPORT_TOOL_NAMES } from '../memory/import-tool';
-import { SANDBOX_TOOL_NAMES } from '../sandbox';
 import { SKILL_CREATOR_TOOL_NAMES } from '../skill/creator-tool';
 import type { ToolDescriptor } from './types';
 
 const SIDEPANEL_RICH_RESULT_TOOL_NAMES = new Set<string>([
-  ...SANDBOX_TOOL_NAMES,
   ...SKILL_CREATOR_TOOL_NAMES,
   ...MEMORY_IMPORT_TOOL_NAMES,
 ]);

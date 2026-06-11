@@ -14,7 +14,6 @@ import type { BackgroundConfig, Memory, PetConfig, PetPosition, SyncConfig, Sync
 import { SVG_PATHS } from '../constants';
 import { getChatEnabled, setChatEnabled } from '../../../core/chat/store';
 import { validateImportedMemory } from '../../../core/sync/schema';
-import DeveloperSettingsPanel from '../components/DeveloperSettingsPanel';
 import PageIntro from '../components/PageIntro';
 import PromptControlPanel from '../components/PromptControlPanel';
 import ScenarioManager from '../components/ScenarioManager';
@@ -667,8 +666,6 @@ export default function SettingsPage() {
       <PromptControlPanel />
 
       <VoiceSettingsPanel />
-
-      <DeveloperSettingsPanel />
 
       <section className="space-y-3">
         <h2 className="text-[13px] font-medium" style={{ color: 'var(--ds-text)' }}>

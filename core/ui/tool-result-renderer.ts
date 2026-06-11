@@ -1,7 +1,5 @@
 import type { ToolCardResult } from '../types';
-import type { ArtifactOutput } from '../artifact';
-import { runBrowserSandbox } from '../sandbox';
-import type { SandboxApprovalOutput, SandboxExecutionResult } from '../sandbox';
+import type { ArtifactOutput, ArtifactRuntimeLanguage } from '../artifact';
 
 export type ToolResultRenderer = (input: {
   target: HTMLElement;
@@ -28,79 +26,8 @@ export function renderToolResultWithRegistry(input: {
 
 export function registerDefaultToolResultRenderers(): void {
   registerToolResultRenderer(renderArtifactResult);
-  registerToolResultRenderer(renderSandboxApprovalResult);
   registerToolResultRenderer(renderSkillDraftResult);
   registerToolResultRenderer(renderMemoryImportPreviewResult);
-}
-
-function renderSandboxApprovalResult(input: {
-  target: HTMLElement;
-  result: ToolCardResult;
-  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>;
-}): boolean {
-  const approval = getSandboxApprovalOutput(input.result.output);
-  if (!approval) return false;
-
-  const wrapper = createResultPanel('dpp-sandbox-result');
-  const meta = document.createElement('div');
-  meta.className = 'dpp-result-meta';
-  meta.textContent = `${approval.language} · ${approval.timeoutMs}ms`;
-  const code = document.createElement('pre');
-  code.className = 'dpp-result-code';
-  code.textContent = approval.code;
-  const output = document.createElement('pre');
-  output.className = 'dpp-result-output';
-  output.hidden = true;
-  const button = createSmallButton('Run after review');
-  button.addEventListener('click', () => {
-    void runApprovedSandbox(approval, input.sendMessage, button, output);
-  });
-  wrapper.append(meta, code, button, output);
-  input.target.appendChild(wrapper);
-  ensureResultStyles();
-  return true;
-}
-
-async function runApprovedSandbox(
-  approval: SandboxApprovalOutput,
-  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>,
-  button: HTMLButtonElement,
-  output: HTMLPreElement,
-): Promise<void> {
-  button.disabled = true;
-  const previous = button.textContent;
-  button.textContent = 'Running...';
-  output.hidden = false;
-  output.textContent = '';
-
-  try {
-    const result = approval.language === 'python'
-      ? await sendMessage<ToolCardResult>({
-        type: 'RUN_APPROVED_SANDBOX',
-        payload: {
-          language: approval.language,
-          code: approval.code,
-          input: approval.input,
-          timeoutMs: approval.timeoutMs,
-        },
-      })
-      : await runBrowserSandbox({
-        language: approval.language,
-        code: approval.code,
-        userInput: approval.input,
-        timeoutMs: approval.timeoutMs,
-      });
-    output.textContent = formatSandboxResult(result);
-    button.textContent = 'Run again';
-  } catch (error) {
-    output.textContent = error instanceof Error ? error.message : String(error);
-    button.textContent = 'Failed';
-  } finally {
-    button.disabled = false;
-    setTimeout(() => {
-      if (button.textContent === 'Failed') button.textContent = previous;
-    }, 2000);
-  }
 }
 
 function renderSkillDraftResult(input: {
@@ -217,6 +144,8 @@ function renderArtifactResult(input: {
   const meta = document.createElement('div');
   meta.className = 'dpp-artifact-meta';
   meta.textContent = `${artifact.filename} · ${formatBytes(artifact.sizeBytes)}${artifact.fileCount ? ` · ${artifact.fileCount} files` : ''}`;
+  const actions = document.createElement('div');
+  actions.className = 'dpp-artifact-actions';
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'dpp-artifact-download';
@@ -224,10 +153,106 @@ function renderArtifactResult(input: {
   button.addEventListener('click', () => {
     void downloadArtifact(artifact, input.sendMessage, button);
   });
-  wrapper.append(meta, button);
+  actions.appendChild(button);
+
+  const output = document.createElement('pre');
+  output.className = 'dpp-artifact-run-output';
+  output.hidden = true;
+
+  if (isRunnableCodeArtifact(artifact)) {
+    const runButton = document.createElement('button');
+    runButton.type = 'button';
+    runButton.className = 'dpp-artifact-run';
+    runButton.textContent = 'Run';
+    runButton.addEventListener('click', () => {
+      void runArtifactCode(artifact, input.sendMessage, runButton, output);
+    });
+    actions.prepend(runButton);
+  }
+
+  if (isHtmlPreviewArtifact(artifact)) {
+    const previewButton = document.createElement('button');
+    previewButton.type = 'button';
+    previewButton.className = 'dpp-artifact-preview';
+    previewButton.textContent = 'Preview';
+    previewButton.addEventListener('click', () => {
+      void openArtifactPreviewPanel(artifact, input.sendMessage);
+    });
+    actions.prepend(previewButton);
+  }
+
+  wrapper.append(meta, actions);
   input.target.appendChild(wrapper);
+  if (isRunnableCodeArtifact(artifact)) input.target.appendChild(output);
   ensureArtifactStyles();
   return true;
+}
+
+function isHtmlPreviewArtifact(artifact: ArtifactOutput): boolean {
+  return artifact.artifactKind === 'file' &&
+    artifact.view?.previewMode === 'html' &&
+    artifact.view.language === 'html';
+}
+
+function isRunnableCodeArtifact(artifact: ArtifactOutput): boolean {
+  return artifact.artifactKind === 'file' &&
+    artifact.view?.previewMode === 'code' &&
+    isRunnableArtifactLanguage(artifact.view.language);
+}
+
+function isRunnableArtifactLanguage(language: ArtifactRuntimeLanguage): language is 'javascript' | 'typescript' | 'python' {
+  return language === 'javascript' || language === 'typescript' || language === 'python';
+}
+
+async function openArtifactPreviewPanel(
+  artifact: ArtifactOutput,
+  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>,
+): Promise<void> {
+  ensureResultStyles();
+  closeArtifactPreviewPanel();
+
+  const panel = document.createElement('section');
+  panel.className = 'dpp-artifact-preview-panel';
+  panel.setAttribute('aria-label', 'Artifact preview');
+  const header = document.createElement('div');
+  header.className = 'dpp-artifact-preview-panel-header';
+  const title = document.createElement('div');
+  title.className = 'dpp-artifact-preview-panel-title';
+  title.textContent = artifact.filename;
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'dpp-artifact-preview-panel-close';
+  closeButton.setAttribute('aria-label', 'Close preview');
+  closeButton.textContent = 'x';
+  closeButton.addEventListener('click', closeArtifactPreviewPanel);
+  header.append(title, closeButton);
+
+  const stage = document.createElement('div');
+  stage.className = 'dpp-artifact-preview-panel-stage';
+  const frame = document.createElement('iframe');
+  frame.className = 'dpp-artifact-preview-panel-frame';
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('title', artifact.filename);
+  stage.appendChild(frame);
+  panel.append(header, stage);
+  document.body.appendChild(panel);
+  document.body.classList.add('dpp-artifact-preview-panel-open');
+
+  try {
+    const record = await getArtifactRecord(artifact, sendMessage);
+    frame.srcdoc = record.content;
+  } catch (error) {
+    frame.remove();
+    const message = document.createElement('div');
+    message.className = 'dpp-artifact-preview-error';
+    message.textContent = error instanceof Error ? error.message : 'Preview failed';
+    stage.appendChild(message);
+  }
+}
+
+function closeArtifactPreviewPanel(): void {
+  document.querySelector('.dpp-artifact-preview-panel')?.remove();
+  document.body.classList.remove('dpp-artifact-preview-panel-open');
 }
 
 async function downloadArtifact(
@@ -266,21 +291,87 @@ async function downloadArtifact(
   }
 }
 
+async function runArtifactCode(
+  artifact: ArtifactOutput,
+  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>,
+  button: HTMLButtonElement,
+  output: HTMLPreElement,
+): Promise<void> {
+  const language = artifact.view?.language;
+  if (!language || !isRunnableArtifactLanguage(language)) return;
+
+  button.disabled = true;
+  const previous = button.textContent;
+  button.textContent = 'Running...';
+  output.hidden = false;
+  output.textContent = '';
+
+  try {
+    const record = await getArtifactRecord(artifact, sendMessage);
+    const result = await runArtifactThroughBackground(record.content, language, sendMessage);
+    output.textContent = formatArtifactRunResult(result);
+    button.textContent = result.ok ? 'Run again' : 'Failed';
+  } catch (error) {
+    output.textContent = error instanceof Error ? error.message : String(error);
+    button.textContent = 'Failed';
+  } finally {
+    setTimeout(() => {
+      button.disabled = false;
+      button.textContent = previous;
+    }, 2000);
+  }
+}
+
+async function getArtifactRecord(
+  artifact: ArtifactOutput,
+  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>,
+): Promise<{ filename: string; mimeType: string; content: string; kind: string }> {
+  const record = await sendMessage<{ ok?: boolean; artifact?: { filename: string; mimeType: string; content: string; kind: string } }>({
+    type: 'GET_ARTIFACT',
+    payload: { id: artifact.artifactId },
+  });
+  if (!record?.artifact) throw new Error('Artifact not found');
+  return record.artifact;
+}
+
+async function runArtifactThroughBackground(
+  code: string,
+  language: 'javascript' | 'typescript' | 'python',
+  sendMessage: <T = unknown>(message: unknown) => Promise<T | undefined>,
+): Promise<ToolCardResult> {
+  const result = await sendMessage<ToolCardResult>({
+    type: 'RUN_ARTIFACT_CODE',
+    payload: {
+      language,
+      code,
+      timeoutMs: language === 'python' ? 15_000 : 5_000,
+    },
+  });
+  if (!result) throw new Error('Code runner did not return a result');
+  return result;
+}
+
+function formatArtifactRunResult(result: ToolCardResult): string {
+  const output = result.output && typeof result.output === 'object'
+    ? result.output as Record<string, unknown>
+    : {};
+  const lines = [
+    result.ok ? 'Code executed' : 'Code failed',
+    result.detail && !output.stdout && !output.stderr && !output.result ? String(result.detail) : '',
+    typeof output.stdout === 'string' && output.stdout ? `stdout:\n${output.stdout}` : '',
+    typeof output.stderr === 'string' && output.stderr ? `stderr:\n${output.stderr}` : '',
+    typeof output.result === 'string' && output.result ? `result:\n${output.result}` : '',
+    result.error?.message ? `error:\n${result.error.message}` : '',
+  ];
+  return lines.filter(Boolean).join('\n\n') || (result.ok ? 'Done' : 'Failed');
+}
+
 function getArtifactOutput(value: unknown): ArtifactOutput | null {
   if (!value || typeof value !== 'object') return null;
   const output = value as ArtifactOutput;
   if (output.kind !== 'artifact') return null;
   if (typeof output.artifactId !== 'string' || typeof output.filename !== 'string') return null;
   if (typeof output.mimeType !== 'string' || typeof output.sizeBytes !== 'number') return null;
-  return output;
-}
-
-function getSandboxApprovalOutput(value: unknown): SandboxApprovalOutput | null {
-  if (!value || typeof value !== 'object') return null;
-  const output = value as SandboxApprovalOutput;
-  if (output.kind !== 'sandbox_approval') return null;
-  if (output.language !== 'javascript' && output.language !== 'typescript' && output.language !== 'python') return null;
-  if (typeof output.code !== 'string' || typeof output.timeoutMs !== 'number') return null;
   return output;
 }
 
@@ -299,21 +390,6 @@ function getMemoryImportPreviewOutput(value: unknown): { kind: 'memory_import_pr
   if (output.kind !== 'memory_import_preview' || !Array.isArray(output.memories)) return null;
   if (typeof output.duplicates !== 'number' || typeof output.rejected !== 'number') return null;
   return value as { kind: 'memory_import_preview'; memories: Array<{ name: string }>; duplicates: number; rejected: number };
-}
-
-function formatSandboxResult(result: unknown): string {
-  const value = result && typeof result === 'object' ? result as Partial<SandboxExecutionResult & ToolCardResult> : {};
-  const lines = [
-    `ok: ${value.ok === true}`,
-    value.summary ? `summary: ${value.summary}` : '',
-    value.detail ? `detail: ${value.detail}` : '',
-    value.stdout ? `stdout:\n${value.stdout}` : '',
-    value.stderr ? `stderr:\n${value.stderr}` : '',
-    value.result ? `result:\n${value.result}` : '',
-    value.output ? `output:\n${typeof value.output === 'string' ? value.output : JSON.stringify(value.output, null, 2)}` : '',
-    value.error ? `error: ${typeof value.error === 'string' ? value.error : JSON.stringify(value.error)}` : '',
-  ];
-  return lines.filter(Boolean).join('\n\n');
 }
 
 function createResultPanel(className: string): HTMLDivElement {
@@ -373,6 +449,12 @@ function ensureResultStyles(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dpp-artifact-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+}
 .dpp-rich-result {
   display: block;
 }
@@ -388,8 +470,81 @@ function ensureResultStyles(): void {
   font-size: 12px;
   color: #3F3F46;
 }
+.dpp-artifact-preview-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 2147483000;
+  display: flex;
+  width: min(48vw, 760px);
+  min-width: 420px;
+  height: 100vh;
+  height: 100dvh;
+  flex-direction: column;
+  border-left: 1px solid rgba(0, 0, 0, 0.10);
+  background: #FFFFFF;
+  box-shadow: -14px 0 40px rgba(15, 23, 42, 0.14);
+  color: #202124;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.dpp-artifact-preview-panel-header {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: #F8F9FB;
+  color: #202124;
+  font-size: 14px;
+  line-height: 20px;
+}
+.dpp-artifact-preview-panel-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.dpp-artifact-preview-panel-close {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #5F6368;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.dpp-artifact-preview-panel-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.dpp-artifact-preview-panel-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #FFFFFF;
+}
+.dpp-artifact-preview-panel-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #FFFFFF;
+}
+.dpp-artifact-preview-error {
+  padding: 16px;
+  color: #B42318;
+  font-size: 12px;
+}
 .dpp-result-code,
-.dpp-result-output {
+.dpp-result-output,
+.dpp-artifact-run-output {
   margin: 8px 0 0;
   max-height: 160px;
   overflow: auto;
@@ -403,7 +558,9 @@ function ensureResultStyles(): void {
   padding: 8px;
 }
 .dpp-result-action,
-.dpp-artifact-download {
+.dpp-artifact-download,
+.dpp-artifact-preview,
+.dpp-artifact-run {
   border: 0;
   border-radius: 7px;
   background: #4D6BFE;
@@ -416,16 +573,52 @@ function ensureResultStyles(): void {
 .dpp-result-action {
   margin-top: 8px;
 }
+.dpp-artifact-download {
+  background: rgba(77, 107, 254, 0.12);
+  color: #3151D3;
+}
 .dpp-result-action:disabled,
-.dpp-artifact-download:disabled {
+.dpp-artifact-download:disabled,
+.dpp-artifact-preview:disabled,
+.dpp-artifact-run:disabled {
   opacity: 0.65;
   cursor: default;
 }
 body.dpp-theme-dark .dpp-artifact-meta { color: #F5F5F5; }
 body.dpp-theme-dark .dpp-result-meta { color: #F5F5F5; }
 body.dpp-theme-dark .dpp-result-text { color: #D4D4D8; }
+body.dpp-theme-dark .dpp-artifact-download {
+  color: #B7C4FF;
+  background: rgba(124, 145, 255, 0.18);
+}
+body.dpp-theme-dark .dpp-artifact-preview-panel {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: #17181C;
+  color: #F5F5F5;
+}
+body.dpp-theme-dark .dpp-artifact-preview-panel-header {
+  border-bottom-color: rgba(255, 255, 255, 0.10);
+  background: #17181C;
+  color: #F5F5F5;
+}
+body.dpp-theme-dark .dpp-artifact-preview-panel-close {
+  color: #D4D4D8;
+}
+body.dpp-theme-dark .dpp-artifact-preview-panel-close:hover {
+  background: rgba(255, 255, 255, 0.10);
+}
+body.dpp-theme-dark .dpp-artifact-preview-panel-stage {
+  background: #FFFFFF;
+}
+@media (max-width: 900px) {
+  .dpp-artifact-preview-panel {
+    width: 100vw;
+    min-width: 0;
+  }
+}
 body.dpp-theme-dark .dpp-result-code,
-body.dpp-theme-dark .dpp-result-output {
+body.dpp-theme-dark .dpp-result-output,
+body.dpp-theme-dark .dpp-artifact-run-output {
   color: #F5F5F5;
   background: rgba(255, 255, 255, 0.08);
 }

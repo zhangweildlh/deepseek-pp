@@ -11,6 +11,7 @@ import {
 import { stripToolCallsFromHistory, stripToolCallsFromIDBResult } from './history-cleanup';
 import { extractResponseTextFromParsed, isResponseTextPatchPath, isStreamFinishedFromParsed, isThinkingPatchPath, parseSSEChunk, parseSSEData } from './sse-parser';
 import { createResponseTokenSpeedTracker, type ResponseTokenSpeedPayload } from './token-speed';
+import { createToolCallScanGate } from './tool-scan-gate';
 import { extractToolCalls } from './tool-parser';
 
 const COMPLETION_PATH = new URL(DEEPSEEK_API_URL).pathname;
@@ -653,9 +654,9 @@ class XmlToolStreamFilter {
       // Text event — apply state machine
       if (this.state === 'SUPPRESSING') {
         const previousPendingLength = this.pendingText.length;
-        this.pendingText += text;
+        const searchText = this.pendingText + text;
         const closeTag = getToolCloseTag(this.currentTool!);
-        const closeIdx = this.pendingText.indexOf(closeTag);
+        const closeIdx = searchText.indexOf(closeTag);
         if (closeIdx !== -1) {
           const tailStart = closeIdx + closeTag.length;
           const tailOffsetInCurrentText = tailStart - previousPendingLength;
@@ -668,6 +669,7 @@ class XmlToolStreamFilter {
           }
           continue;
         }
+        this.pendingText = this.getCloseSearchTail(searchText, this.currentTool!);
         if (isFragmentCreation || isBatchPatch(effectiveParsed)) {
           const modified = cloneParsedWithTextPrefix(effectiveParsed, 0);
           if (modified) {
@@ -706,7 +708,7 @@ class XmlToolStreamFilter {
       if (closeIdx === -1) {
         this.state = 'SUPPRESSING';
         this.currentTool = found.tool;
-        this.pendingText = this.pendingText.slice(found.idx);
+        this.pendingText = this.getCloseSearchTail(this.pendingText.slice(found.idx), found.tool);
         return;
       }
 
@@ -752,6 +754,11 @@ class XmlToolStreamFilter {
       text: modifiedText,
       isFragmentCreation: isFragmentCreation || isFragmentCreationPatch(modified),
     };
+  }
+
+  private getCloseSearchTail(text: string, tool: string): string {
+    const tailSize = Math.max(0, getToolCloseTag(tool).length - 1);
+    return tailSize > 0 ? text.slice(-tailSize) : '';
   }
 
   flush(controller: ReadableStreamDefaultController<Uint8Array>) {
@@ -833,6 +840,7 @@ async function interceptFetchResponse(
   const decoder = new TextDecoder();
   const toolDescriptors = hookState.toolDescriptors;
   const filter = new XmlToolStreamFilter(toolDescriptors, requestContext.originalPrompt);
+  const toolCallScanGate = createToolCallScanGate(toolDescriptors);
   let fullText = '';
   let notifiedCount = 0;
   let textAccBuffer = '';
@@ -857,7 +865,9 @@ async function interceptFetchResponse(
       if (eventText) {
         fullText += eventText;
         speedTracker.append(eventText);
-        notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+        if (toolCallScanGate.shouldScanChunk(eventText)) {
+          notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+        }
       } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
         speedTracker.append((parsed as any).v);
       }
@@ -886,7 +896,9 @@ async function interceptFetchResponse(
                 if (eventText) {
                   fullText += eventText;
                   speedTracker.append(eventText);
-                  notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+                  if (toolCallScanGate.shouldScanChunk(eventText)) {
+                    notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+                  }
                 } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
                   speedTracker.append((parsed as any).v);
                 }
@@ -956,6 +968,7 @@ function setupXHRResponseInterceptor(xhr: XMLHttpRequest, requestContext: Reques
   let assistantMessageId: number | null = null;
   const toolDescriptors = hookState.toolDescriptors;
   const filter = new XmlToolStreamFilter(toolDescriptors, requestContext.originalPrompt);
+  const toolCallScanGate = createToolCallScanGate(toolDescriptors);
   const speedTracker = createResponseTokenSpeedTracker(
     hookState.onResponseTokenSpeed,
     TOKEN_SPEED_EMIT_INTERVAL_MS,
@@ -1002,7 +1015,9 @@ function setupXHRResponseInterceptor(xhr: XMLHttpRequest, requestContext: Reques
           if (text) {
             fullText += text;
             speedTracker.append(text);
-            notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+            if (toolCallScanGate.shouldScanChunk(text)) {
+              notifiedCount = notifyNewToolCalls(fullText, notifiedCount, toolDescriptors);
+            }
           }
           if (isStreamFinishedFromParsed(parsed)) {
             speedTracker.finish();

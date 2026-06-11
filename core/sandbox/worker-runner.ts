@@ -1,76 +1,146 @@
+import { transform } from 'sucrase';
 import type { SandboxExecutionResult, SandboxLanguage } from './types';
+import PythonWorker from './python-worker?worker&inline';
 
 const WORKER_OUTPUT_LIMIT = 12_000;
 
-export function canRunBrowserSandbox(language: SandboxLanguage): boolean {
-  return (language === 'javascript' || language === 'typescript') &&
+export function canRunWorkerSandbox(language: SandboxLanguage): boolean {
+  return (language === 'javascript' || language === 'typescript' || language === 'python') &&
     typeof Worker !== 'undefined' &&
     typeof Blob !== 'undefined' &&
     typeof URL !== 'undefined';
 }
 
-export function runBrowserSandbox(input: {
+export function runWorkerSandbox(input: {
   language: SandboxLanguage;
   code: string;
   userInput?: string;
   timeoutMs: number;
+  pyodideBaseUrl?: string;
 }): Promise<SandboxExecutionResult> {
-  if (!canRunBrowserSandbox(input.language)) {
+  if (!canRunWorkerSandbox(input.language)) {
     return Promise.resolve({
       ok: false,
       stdout: '',
       stderr: '',
       durationMs: 0,
       truncated: false,
-      error: `${input.language} sandbox is not available in this browser context`,
+      error: `${input.language} sandbox is not available in this context`,
     });
   }
+  if (input.language === 'python') return runPythonWorkerSandbox(input);
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const workerUrl = URL.createObjectURL(new Blob([createWorkerSource()], { type: 'text/javascript' }));
     const worker = new Worker(workerUrl);
-    const timeout = setTimeout(() => {
+    let settled = false;
+
+    const settle = (result: Omit<SandboxExecutionResult, 'durationMs'>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       worker.terminate();
       URL.revokeObjectURL(workerUrl);
       resolve({
+        ...result,
+        durationMs: Date.now() - startedAt,
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      settle({
         ok: false,
         stdout: '',
         stderr: 'Sandbox execution timed out.',
-        durationMs: Date.now() - startedAt,
         truncated: false,
         error: 'sandbox_timeout',
       });
     }, input.timeoutMs);
 
     worker.onmessage = (event) => {
-      clearTimeout(timeout);
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      const result = normalizeWorkerResult(event.data);
-      resolve({
-        ...result,
-        durationMs: Date.now() - startedAt,
-      });
+      settle(normalizeWorkerResult(event.data));
     };
     worker.onerror = (event) => {
-      clearTimeout(timeout);
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      resolve({
+      settle({
         ok: false,
         stdout: '',
         stderr: event.message,
-        durationMs: Date.now() - startedAt,
         truncated: false,
         error: 'sandbox_worker_error',
       });
     };
 
     worker.postMessage({
-      code: input.language === 'typescript' ? stripTypeScriptSyntax(input.code) : input.code,
+      code: input.language === 'typescript' ? transpileTypeScript(input.code) : input.code,
       input: input.userInput ?? '',
       outputLimit: WORKER_OUTPUT_LIMIT,
+    });
+  });
+}
+
+function runPythonWorkerSandbox(input: {
+  language: SandboxLanguage;
+  code: string;
+  userInput?: string;
+  timeoutMs: number;
+  pyodideBaseUrl?: string;
+}): Promise<SandboxExecutionResult> {
+  if (!input.pyodideBaseUrl) {
+    return Promise.resolve({
+      ok: false,
+      stdout: '',
+      stderr: 'Pyodide runtime assets are unavailable.',
+      durationMs: 0,
+      truncated: false,
+      error: 'sandbox_pyodide_assets_unavailable',
+    });
+  }
+
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const worker = new PythonWorker();
+    let settled = false;
+
+    const settle = (result: Omit<SandboxExecutionResult, 'durationMs'>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      worker.terminate();
+      resolve({
+        ...result,
+        durationMs: Date.now() - startedAt,
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      settle({
+        ok: false,
+        stdout: '',
+        stderr: 'Python sandbox execution timed out.',
+        truncated: false,
+        error: 'sandbox_timeout',
+      });
+    }, input.timeoutMs);
+
+    worker.onmessage = (event) => {
+      settle(normalizeWorkerResult(event.data));
+    };
+    worker.onerror = (event) => {
+      settle({
+        ok: false,
+        stdout: '',
+        stderr: event.message,
+        truncated: false,
+        error: 'sandbox_pyodide_worker_error',
+      });
+    };
+
+    worker.postMessage({
+      code: input.code,
+      input: input.userInput ?? '',
+      outputLimit: WORKER_OUTPUT_LIMIT,
+      pyodideBaseUrl: input.pyodideBaseUrl,
     });
   });
 }
@@ -96,11 +166,12 @@ function normalizeWorkerResult(value: unknown): Omit<SandboxExecutionResult, 'du
   };
 }
 
-function stripTypeScriptSyntax(code: string): string {
-  return code
-    .replace(/^\s*(?:type|interface)\s+[A-Za-z0-9_$]+[\s\S]*?^\s*}\s*;?\s*$/gm, '')
-    .replace(/\s+as\s+[A-Za-z0-9_$<>{}[\]|&,\s.]+/g, '')
-    .replace(/:\s*[A-Za-z0-9_$<>{}[\]|&,\s.]+(?=\s*[,)=;])/g, '');
+function transpileTypeScript(code: string): string {
+  return transform(code, {
+    transforms: ['typescript'],
+    disableESTransforms: true,
+    production: true,
+  }).code;
 }
 
 function createWorkerSource(): string {
@@ -109,7 +180,6 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 self.onmessage = async (event) => {
   const { code, input, outputLimit } = event.data || {};
   const logs = [];
-  let truncated = false;
   const push = (level, values) => {
     const line = '[' + level + '] ' + values.map(formatValue).join(' ');
     logs.push(line);

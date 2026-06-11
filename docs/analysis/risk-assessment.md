@@ -29,7 +29,7 @@
 | Project mode + local RAG | `project-manager.js`, `rag-engine.js`, Projects UI | Not supported | P0 | Add Projects/ProjectFiles store, BM25-style retrieval, prompt injection budget controls |
 | Generated files + LONG_WORK zip | `BDS:create_file`, `BDS:LONG_WORK`, `files/long-work.js` | Not supported | P0 | Add artifact tool provider and content cards; use existing tool parser/contracts, not BDS tags |
 | Rich inline cards: HTML/visualizer/PPTX/Excel/DOCX | parser/tool cards/sandbox | Partial via OfficeCLI skill/Shell; no browser-side generated artifact cards | P1 | Start with file/artifact cards, then optionally office/browser sandbox |
-| Browser sandbox code runner | `AUTO:CODE_RUNNER`, `CodeRunner`, sandbox iframe | Partial: Shell/Python native host exists, but no browser sandbox or Android-compatible runner | P1 | Add user-approved sandbox local tool with strict output and no silent auto-exec |
+| Browser sandbox code runner | `AUTO:CODE_RUNNER`, `CodeRunner`, sandbox iframe | Partial: Shell/Python native host exists, but no browser sandbox or Android-compatible runner | P1 | Add isolated sandbox local tool with strict output limits and explicit timeout handling |
 | Voice STT/TTS | README and settings | Not supported | P1 | Add optional Web Speech API surface for browser; Android bridge later |
 | Saved items/bookmarks/snippets | `SavedItems.svelte`, snippets | Not supported | P1 | Add saved item/snippet store and prompt insertion UX |
 | Chat tags/filtering/history search | sidebar injectors/tag modules | Not supported | P1 | Requires DeepSeek sidebar DOM adapter; keep separate from official export |
@@ -97,7 +97,7 @@ Project files, folder imports, GitHub repo fetch, and RAG search are likely to b
 - Android needs at least four layers: pure TypeScript platform-adapter tests, Android bridge unit tests, Gradle assemble, and emulator/WebView smoke. Missing local SDK/Gradle must be reported as a validation gap.
 - Prompt/tool changes must update `prompt:freeze` intentionally.
 - File ingestion and RAG require fixtures for binary filtering, size limits, `.gitignore`, branch fallback, private repo token errors, and prompt budget behavior.
-- Artifact/code-runner features require sandbox tests and user-approval tests before release.
+- Artifact/code-runner features require sandbox execution, timeout, and output-limit tests before release.
 
 ## Project Governance Risks
 

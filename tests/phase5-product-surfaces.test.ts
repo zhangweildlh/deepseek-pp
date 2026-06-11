@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  normalizeDeveloperSettings,
-  saveDeveloperSettings,
-  getDeveloperSettings,
-} from '../core/developer/settings';
-import { runApiPlayground } from '../core/developer/api-playground';
-import {
   createImageAttachmentManifestArtifact,
   createMessageMarkdownArtifact,
   createSavedItemsJsonArtifact,
@@ -47,47 +41,6 @@ afterEach(() => {
 });
 
 describe('Phase 5 product surface helpers', () => {
-  it('normalizes developer settings so playground cannot enable without developer mode', async () => {
-    expect(normalizeDeveloperSettings({ developerMode: false, apiPlaygroundEnabled: true })).toEqual({
-      developerMode: false,
-      apiPlaygroundEnabled: false,
-    });
-
-    await saveDeveloperSettings({ developerMode: true });
-    const saved = await saveDeveloperSettings({ apiPlaygroundEnabled: true });
-    expect(saved).toEqual({ developerMode: true, apiPlaygroundEnabled: true });
-    expect(await getDeveloperSettings()).toEqual(saved);
-  });
-
-  it('runs the API playground without returning the API key', async () => {
-    const seenHeaders: string[] = [];
-    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      seenHeaders.push(String((init?.headers as Record<string, string>).authorization));
-      return new Response(createSseStream([
-        'data: {"choices":[{"delta":{"content":"pong"}}]}\n\n',
-        'data: [DONE]\n\n',
-      ]), { status: 200 });
-    }) as unknown as typeof fetch;
-
-    const result = await runApiPlayground({
-      apiKey: 'sk-secret',
-      prompt: 'ping',
-      modelType: null,
-      fetchImpl,
-    });
-
-    expect(result).toMatchObject({
-      ok: true,
-      output: 'pong',
-      request: {
-        messageCount: 1,
-        thinking: 'disabled',
-      },
-    });
-    expect(JSON.stringify(result)).not.toContain('sk-secret');
-    expect(seenHeaders).toEqual(['Bearer sk-secret']);
-  });
-
   it('extracts DeepSeek history items with tags isolated from DOM text', () => {
     document.body.innerHTML = `
       <nav>
@@ -245,13 +198,3 @@ describe('Phase 5 product surface helpers', () => {
     }]).content).toContain('chart.png');
   });
 });
-
-function createSseStream(chunks: string[]): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-      controller.close();
-    },
-  });
-}
