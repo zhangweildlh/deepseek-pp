@@ -59,6 +59,8 @@ import {
   renderToolResultWithRegistry,
 } from '../core/ui/tool-result-renderer';
 import { validateBridgeMessage } from '../core/messaging/schema';
+import { startDeepSeekHistoryOrganizer, type HistoryOrganizerController } from './content/adapters/history-organizer';
+import { startContentUxPolish, type ContentUxPolishController } from './content/adapters/ux-polish';
 
 import { createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
 import type {
@@ -117,14 +119,15 @@ const PET_BUBBLE_RECENT_LIMIT = 3;
 type ExportResponse = ConversationExportResult | { ok: false; exportId?: string; error: string };
 interface ConversationExportFormatOption {
   format: ConversationExportArtifact['format'];
-  label: string;
+  labelKey: LocaleMessageKey;
   defaultChecked: boolean;
 }
 
 const CONVERSATION_EXPORT_FORMAT_OPTIONS: ConversationExportFormatOption[] = [
-  { format: 'html', label: 'HTML', defaultChecked: true },
-  { format: 'markdown', label: 'Markdown', defaultChecked: false },
-  { format: 'pdf', label: 'PDF', defaultChecked: false },
+  { format: 'html', labelKey: 'content.export.formatHtml', defaultChecked: true },
+  { format: 'markdown', labelKey: 'content.export.formatMarkdown', defaultChecked: false },
+  { format: 'pdf', labelKey: 'content.export.formatPdf', defaultChecked: false },
+  { format: 'image_manifest', labelKey: 'content.export.formatImageManifest', defaultChecked: false },
 ];
 // These states keep rotating pet lines during long stays; other states speak once on entry.
 const PET_BUBBLE_LOOPING_STATES: ReadonlySet<PetState> = new Set<PetState>([
@@ -169,6 +172,8 @@ let exportActionToastTimer: ReturnType<typeof setTimeout> | null = null;
 let exportActionMenuEl: HTMLElement | null = null;
 let exportActionMenuButton: HTMLButtonElement | null = null;
 let exportActionMenuSessionId: string | null = null;
+let historyOrganizerController: HistoryOrganizerController | null = null;
+let contentUxPolishController: ContentUxPolishController | null = null;
 const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let restoredRenderAttempts = 0;
@@ -235,6 +240,8 @@ function refreshLocalizedContentSurfaces(): void {
   if (exportActionMenuEl && exportActionMenuButton) {
     showConversationExportMenu(exportActionMenuButton);
   }
+  historyOrganizerController?.refreshLabels();
+  contentUxPolishController?.refreshLabels();
   renderTokenSpeedIndicator(lastTokenSpeedProgress);
   if (toolBlockEl) updateToolBlockContent(toolBlockEl, toolExecutions);
   scheduleRenderRestoredToolBlocks();
@@ -250,6 +257,33 @@ function getAgentRendererLabels() {
       contentT('content.agent.footerComplete', { steps: totalSteps, tools: totalTools }),
     footerError: (totalSteps: number, totalTools: number) =>
       contentT('content.agent.footerError', { steps: totalSteps, tools: totalTools }),
+  };
+}
+
+function getHistoryOrganizerLabels() {
+  return {
+    title: contentT('content.historyOrganizer.title'),
+    searchPlaceholder: contentT('content.historyOrganizer.searchPlaceholder'),
+    tagPlaceholder: contentT('content.historyOrganizer.tagPlaceholder'),
+    currentTagsPlaceholder: contentT('content.historyOrganizer.currentTagsPlaceholder'),
+    noHistoryDetected: contentT('content.historyOrganizer.noHistoryDetected'),
+    visibleStatus: (visibleCount: number, totalCount: number) =>
+      contentT('content.historyOrganizer.visibleStatus', { visible: visibleCount, total: totalCount }),
+    storageError: (action: 'load' | 'save', message: string) =>
+      contentT(
+        action === 'load'
+          ? 'content.historyOrganizer.loadError'
+          : 'content.historyOrganizer.saveError',
+        { message },
+      ),
+  };
+}
+
+function getContentUxPolishLabels() {
+  return {
+    codeDownloadButton: contentT('content.uxPolish.downloadCode'),
+    messageMarkdownButton: contentT('content.uxPolish.downloadMessageMarkdownButton'),
+    messageMarkdownTitle: contentT('content.uxPolish.downloadMessageMarkdownTitle'),
   };
 }
 
@@ -336,6 +370,8 @@ export default defineContentScript({
     startTokenSpeedIndicatorMountObserver();
     startTokenSpeedRouteWatcher();
     startConversationExportActionInjector();
+    historyOrganizerController = startDeepSeekHistoryOrganizer(getHistoryOrganizerLabels);
+    contentUxPolishController = startContentUxPolish(getContentUxPolishLabels);
 
     startRenderedToolCallCleaner();
     void restorePersistedToolBlocks();
@@ -590,6 +626,10 @@ function invalidateExtensionContext() {
   stopTokenSpeedRouteWatcher();
   removeTokenSpeedIndicator();
   stopConversationExportActionInjector();
+  historyOrganizerController?.stop();
+  historyOrganizerController = null;
+  contentUxPolishController?.stop();
+  contentUxPolishController = null;
 }
 
 /** Isolated world writes captured DeepSeek request headers to chrome.storage. */
@@ -917,7 +957,7 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     input.value = option.format;
     input.checked = option.defaultChecked;
     const text = document.createElement('span');
-    text.textContent = option.label;
+    text.textContent = contentT(option.labelKey);
     label.append(input, text);
     form.appendChild(label);
   }

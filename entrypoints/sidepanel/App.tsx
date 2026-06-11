@@ -2,10 +2,11 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import type { LocaleMessageKey } from '../../core/i18n';
 import { getExtensionVersion } from '../../core/version';
 import { getChatEnabled } from '../../core/chat/store';
+import { DEFAULT_DEVELOPER_SETTINGS, normalizeDeveloperSettings, type DeveloperSettings } from '../../core/developer/settings';
 import { useI18n } from './i18n';
 import { setPendingText } from './pending-text';
 
-type Tab = 'chat' | 'memory' | 'projects' | 'saved' | 'capabilities' | 'preset' | 'automation' | 'settings';
+type Tab = 'chat' | 'memory' | 'projects' | 'saved' | 'capabilities' | 'preset' | 'automation' | 'developer' | 'settings';
 
 const MemoryPage = lazy(() => import('./pages/MemoryPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
@@ -15,6 +16,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const AutomationPage = lazy(() => import('./pages/AutomationPage'));
 const CapabilitiesPage = lazy(() => import('./pages/CapabilitiesPage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
+const DeveloperPage = lazy(() => import('./pages/DeveloperPage'));
 
 const TABS: { key: Tab; labelKey: LocaleMessageKey; icon: string }[] = [
   { key: 'chat', labelKey: 'app.tabs.chat', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
@@ -24,6 +26,7 @@ const TABS: { key: Tab; labelKey: LocaleMessageKey; icon: string }[] = [
   { key: 'capabilities', labelKey: 'app.tabs.capabilities', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
   { key: 'preset', labelKey: 'app.tabs.preset', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { key: 'automation', labelKey: 'app.tabs.automation', icon: 'M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z' },
+  { key: 'developer', labelKey: 'app.tabs.developer', icon: 'M8 9l3 3-3 3m5 0h3M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z' },
   { key: 'settings', labelKey: 'app.tabs.settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
 
@@ -32,6 +35,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('chat');
   const version = getExtensionVersion();
   const [chatEnabled, setChatEnabledState] = useState<boolean | null>(null);
+  const [developerSettings, setDeveloperSettings] = useState<DeveloperSettings>(DEFAULT_DEVELOPER_SETTINGS);
 
   useEffect(() => {
     getChatEnabled().then(setChatEnabledState);
@@ -45,10 +49,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'GET_DEVELOPER_SETTINGS' })
+      .then((result) => setDeveloperSettings(normalizeDeveloperSettings(result)))
+      .catch(() => setDeveloperSettings(DEFAULT_DEVELOPER_SETTINGS));
+    const handler = (message: { type?: string; settings?: DeveloperSettings }) => {
+      if (message.type === 'DEVELOPER_SETTINGS_UPDATED') {
+        setDeveloperSettings(normalizeDeveloperSettings(message.settings));
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
+  }, []);
+
+  useEffect(() => {
     if (chatEnabled === false && tab === 'chat') {
       setTab('memory');
     }
-  }, [chatEnabled, tab]);
+    if (!developerSettings.developerMode && tab === 'developer') {
+      setTab('settings');
+    }
+  }, [chatEnabled, developerSettings.developerMode, tab]);
 
   // Read pending text on mount in case the sidepanel opened after the message was sent.
   useEffect(() => {
@@ -96,7 +116,10 @@ export default function App() {
       </header>
 
       <nav className="side-tabs" aria-label={t('app.sideNavLabel')}>
-        {TABS.filter(tabConfig => chatEnabled !== false || tabConfig.key !== 'chat').map((tabConfig) => {
+        {TABS.filter((tabConfig) =>
+          (chatEnabled !== false || tabConfig.key !== 'chat') &&
+          (developerSettings.developerMode || tabConfig.key !== 'developer')
+        ).map((tabConfig) => {
           const label = t(tabConfig.labelKey);
           return (
             <button
@@ -140,6 +163,7 @@ export default function App() {
           {tab === 'capabilities' && <CapabilitiesPage />}
           {tab === 'preset' && <PresetPage />}
           {tab === 'automation' && <AutomationPage />}
+          {tab === 'developer' && <DeveloperPage />}
           {tab === 'settings' && <SettingsPage />}
         </Suspense>
       </main>

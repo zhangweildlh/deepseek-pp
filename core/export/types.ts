@@ -4,7 +4,7 @@ export type ConversationExportSchemaVersion = typeof CONVERSATION_EXPORT_SCHEMA_
 
 export type ConversationExportMode = 'raw' | 'sanitized';
 
-export type ConversationExportFormat = 'markdown' | 'html' | 'pdf';
+export type ConversationExportFormat = 'markdown' | 'html' | 'pdf' | 'image_manifest';
 
 export type ExportProgressPhase =
   | 'starting'

@@ -90,6 +90,11 @@ import {
   saveVoiceSettings,
 } from '../core/voice/settings';
 import type { SandboxRunRequest } from '../core/sandbox';
+import {
+  getDeveloperSettings,
+  saveDeveloperSettings,
+} from '../core/developer/settings';
+import { runApiPlayground } from '../core/developer/api-playground';
 import { getCurrentBrowserExtensionEnvironment } from '../core/platform';
 import {
   createMcpServer,
@@ -160,7 +165,7 @@ import {
   watchLocalePreference,
 } from '../core/i18n/store';
 import type { WebSearchToolName } from '../core/tool/web-search';
-import type { BackgroundConfig, DeepSeekTheme, GitHubSkillImportRequest, GitHubSkillSource, Memory, ModelType, NewMemory, PetConfig, ProjectContextState, SavedItemInput, Skill, SyncConfig, SyncCounts, SystemPromptPreset, ToolCall, ToolDescriptor, ToolExecutionRecord, ToolResult } from '../core/types';
+import type { BackgroundConfig, DeepSeekTheme, DeveloperSettings, GitHubSkillImportRequest, GitHubSkillSource, Memory, ModelType, NewMemory, PetConfig, ProjectContextState, SavedItemInput, Skill, SyncConfig, SyncCounts, SystemPromptPreset, ToolCall, ToolDescriptor, ToolExecutionRecord, ToolResult } from '../core/types';
 import type { McpServerCreateInput, McpServerUpdateInput } from '../core/mcp/types';
 import type { AutomationCreateInput, AutomationRunnerRequest, AutomationRunnerResult, AutomationStatus, AutomationUpdateInput } from '../core/automation/types';
 import type { ConversationExportProgress, ConversationExportResult } from '../core/export/types';
@@ -567,6 +572,15 @@ async function handleMessage(
     case 'GET_VOICE_CAPABILITIES':
       return detectVoiceCapabilities();
 
+    case 'GET_DEVELOPER_SETTINGS':
+      return getDeveloperSettings();
+
+    case 'SAVE_DEVELOPER_SETTINGS': {
+      const settings = await saveDeveloperSettings(message.payload as Partial<DeveloperSettings>);
+      await broadcastDeveloperSettingsUpdate(sender.tab?.id);
+      return settings;
+    }
+
     case 'GET_MCP_SERVERS':
       return getAllMcpServers();
 
@@ -676,6 +690,21 @@ async function handleMessage(
         }
       }
       return diags;
+    }
+
+    case 'RUN_DEEPSEEK_API_PLAYGROUND': {
+      const settings = await getDeveloperSettings();
+      if (!settings.developerMode || !settings.apiPlaygroundEnabled) {
+        return { ok: false, error: 'api_playground_disabled' };
+      }
+      const apiKey = await getDeepSeekApiKey();
+      if (!apiKey) return { ok: false, error: 'deepseek_api_key_missing' };
+      const { prompt, modelType } = message.payload as { prompt?: string; modelType?: ModelType };
+      return runApiPlayground({
+        apiKey,
+        prompt: prompt ?? '',
+        modelType: modelType ?? await getModelType(),
+      });
     }
 
     case 'REQUEST_HOST_PERMISSION': {
@@ -1119,6 +1148,11 @@ async function broadcastSavedItemsUpdate(excludeTabId?: number) {
 async function broadcastVoiceSettingsUpdate(excludeTabId?: number) {
   const voiceSettings = await getVoiceSettings();
   await broadcastToTabs({ type: 'VOICE_SETTINGS_UPDATED', voiceSettings }, excludeTabId);
+}
+
+async function broadcastDeveloperSettingsUpdate(excludeTabId?: number) {
+  const settings = await getDeveloperSettings();
+  await broadcastToTabs({ type: 'DEVELOPER_SETTINGS_UPDATED', settings }, excludeTabId);
 }
 
 async function broadcastAutomationUpdate(excludeTabId?: number) {

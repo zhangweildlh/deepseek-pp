@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SavedItem, SavedItemInput, SavedItemKind } from '../../../core/saved-items';
+import { createSavedItemsJsonArtifact, createSavedItemsMarkdownArtifact, type SecondaryExportArtifact } from '../../../core/export/secondary-artifacts';
 import { SVG_PATHS } from '../constants';
 import { useI18n } from '../i18n';
 
@@ -64,6 +65,13 @@ export default function SavedPage({ onInsertPrompt }: SavedPageProps) {
     await load();
   };
 
+  const exportItems = (format: 'markdown' | 'json') => {
+    const artifact = format === 'json'
+      ? createSavedItemsJsonArtifact(items)
+      : createSavedItemsMarkdownArtifact(items);
+    downloadSecondaryArtifact(artifact);
+  };
+
   const inputClass = 'w-full px-3 py-2 text-xs rounded-lg border outline-none transition-colors focus:border-[var(--ds-blue)]';
   const inputStyle = {
     background: 'var(--ds-bg)',
@@ -80,6 +88,25 @@ export default function SavedPage({ onInsertPrompt }: SavedPageProps) {
         <span className="text-[11px]" style={{ color: 'var(--ds-text-tertiary)' }}>
           {t('sidepanel.savedPage.count', { count: items.length })}
         </span>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => exportItems('markdown')}
+          disabled={items.length === 0}
+          className="ds-btn-secondary flex-1 py-2 text-[11px] font-medium rounded-lg disabled:opacity-40"
+        >
+          {t('sidepanel.savedPage.exportMarkdown')}
+        </button>
+        <button
+          type="button"
+          onClick={() => exportItems('json')}
+          disabled={items.length === 0}
+          className="ds-btn-secondary flex-1 py-2 text-[11px] font-medium rounded-lg disabled:opacity-40"
+        >
+          {t('sidepanel.savedPage.exportJson')}
+        </button>
       </div>
 
       <div className="ds-surface-panel rounded-xl p-4 space-y-3">
@@ -189,4 +216,16 @@ export default function SavedPage({ onInsertPrompt }: SavedPageProps) {
       </div>
     </div>
   );
+}
+
+function downloadSecondaryArtifact(artifact: SecondaryExportArtifact): void {
+  const blob = new Blob([artifact.content], { type: artifact.mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = artifact.filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }

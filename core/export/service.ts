@@ -2,6 +2,7 @@ import { buildAttachmentManifest, collectAttachmentIds, normalizeDeepSeekFileMet
 import { createConversationExportHtmlArtifact } from './artifact-html';
 import { createConversationExportMarkdownArtifact } from './artifact-markdown';
 import { createConversationExportPdfArtifact } from './artifact-pdf';
+import { createConversationImageManifestArtifact } from './secondary-artifacts';
 import {
   normalizeConversationExportRequest,
   validateConversationExport,
@@ -195,6 +196,7 @@ function createConversationExportArtifact(
 ): ConversationExportArtifact {
   if (format === 'markdown') return createConversationExportMarkdownArtifact(exportData);
   if (format === 'pdf') return createConversationExportPdfArtifact(exportData);
+  if (format === 'image_manifest') return createConversationImageManifestArtifact(exportData);
   return createConversationExportHtmlArtifact(exportData);
 }
 

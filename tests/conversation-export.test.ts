@@ -110,7 +110,7 @@ describe('DeepSeek conversation export adapter and service', () => {
       baseUrl: 'https://chat.deepseek.com',
       request: {
         mode: 'sanitized',
-        formats: ['markdown', 'html', 'pdf'],
+        formats: ['markdown', 'html', 'pdf', 'image_manifest'],
         includeAttachmentMetadata: true,
         includeFileBodies: false,
         pageSize: 1,
@@ -140,7 +140,7 @@ describe('DeepSeek conversation export adapter and service', () => {
     expect(exportData.sessions[0].failures[0].code).toBe('message_id_missing');
 
     const artifacts = buildConversationExportArtifacts(exportData);
-    expect(artifacts.map((artifact) => artifact.format)).toEqual(['markdown', 'html', 'pdf']);
+    expect(artifacts.map((artifact) => artifact.format)).toEqual(['markdown', 'html', 'pdf', 'image_manifest']);
     expect(artifacts.find((artifact) => artifact.format === 'markdown')?.content).toContain('Synthetic Alpha');
     expect(artifacts.find((artifact) => artifact.format === 'html')?.content).toContain('<!doctype html>');
     expect(artifacts.find((artifact) => artifact.format === 'pdf')).toMatchObject({
@@ -148,6 +148,11 @@ describe('DeepSeek conversation export adapter and service', () => {
       mimeType: 'application/pdf',
     });
     expect(artifacts.find((artifact) => artifact.format === 'pdf')?.content.startsWith('%PDF-1.4')).toBe(true);
+    expect(artifacts.find((artifact) => artifact.format === 'image_manifest')).toMatchObject({
+      filename: 'deepseek-image-manifest-2026-06-06.html',
+      mimeType: 'text/html;charset=utf-8',
+    });
+    expect(artifacts.find((artifact) => artifact.format === 'image_manifest')?.content).toContain('0 image attachments');
   });
 
   it('derives the official pagination cursor from the last session', async () => {

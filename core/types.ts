@@ -8,6 +8,7 @@ import type {
   ProjectContextState,
   ProjectFileInput,
 } from './project/types';
+import type { DeveloperSettings as DeveloperSettingsType } from './developer/settings';
 import type { PromptInjectionSettings as PromptInjectionSettingsType } from './prompt/settings';
 import type { SandboxRunRequest as SandboxRunRequestType } from './sandbox/types';
 import type {
@@ -83,6 +84,10 @@ export type {
   ArtifactOutput,
   ArtifactRecord,
 } from './artifact/types';
+
+export type {
+  DeveloperSettings,
+} from './developer/settings';
 
 export type {
   PromptInjectionSettings,
@@ -390,6 +395,9 @@ export type MessageAction =
   | { type: 'GET_VOICE_SETTINGS' }
   | { type: 'SAVE_VOICE_SETTINGS'; payload: Partial<VoiceSettingsType> }
   | { type: 'GET_VOICE_CAPABILITIES' }
+  | { type: 'GET_DEVELOPER_SETTINGS' }
+  | { type: 'SAVE_DEVELOPER_SETTINGS'; payload: Partial<DeveloperSettingsType> }
+  | { type: 'RUN_DEEPSEEK_API_PLAYGROUND'; payload: { prompt: string; modelType?: ModelType } }
   | { type: 'GET_MCP_SERVERS' }
   | { type: 'GET_MCP_SERVER'; payload: { id: McpServerId } }
   | { type: 'CREATE_MCP_SERVER'; payload: McpServerCreateInput }
