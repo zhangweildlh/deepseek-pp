@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -86,6 +87,14 @@ describe('WhatsNewPanel', () => {
     expect(storage[LAST_SEEN_VERSION_KEY]).toBe('0.7.0');
     expect(storage[PENDING_UPDATE_VERSION_KEY]).toBeUndefined();
     expect(sendMessage).toHaveBeenCalledWith({ type: 'WHATS_NEW_DISMISSED' });
+  });
+
+  it('does not use a fixed overlay that can cover the side navigation', () => {
+    const css = readFileSync('entrypoints/sidepanel/style.css', 'utf8');
+    const match = css.match(/\.ds-whats-new-popover\s*\{(?<body>[^}]*)\}/);
+
+    expect(match?.groups?.body).toBeTruthy();
+    expect(match!.groups!.body).not.toContain('position: fixed');
   });
 });
 
