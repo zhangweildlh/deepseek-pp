@@ -70,6 +70,12 @@ export async function deleteMemory(id: number): Promise<void> {
   await db.memories.delete(id);
 }
 
+export async function deleteMemoriesForProject(projectId: string): Promise<number> {
+  const trimmedProjectId = projectId.trim();
+  if (!trimmedProjectId) throw new Error('Project id is required.');
+  return db.memories.where('projectId').equals(trimmedProjectId).delete();
+}
+
 export async function touchMemories(ids: number[]): Promise<void> {
   const now = Date.now();
   await db.memories

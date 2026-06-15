@@ -49,6 +49,7 @@ export async function runDeepSeekAutomation(
     const { augmented: prompt } = buildPromptAugmentation(request.prompt, {
       memories: request.promptContext?.memories ?? [],
       presetContent: request.promptContext?.presetContent ?? null,
+      projectContext: request.promptContext?.projectContext ?? null,
       thinkingEnabled: request.promptOptions.thinkingEnabled,
       toolDescriptors: request.promptContext?.toolDescriptors ?? DEFAULT_TOOL_DESCRIPTORS,
       locale,

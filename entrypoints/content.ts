@@ -596,28 +596,31 @@ async function handleAugmentRequestBody(data: { id?: unknown; body?: unknown }):
 }
 
 async function resolveProjectContextForRequestBody(bodyStr: string): Promise<ResolvedProjectAugmentationContext | null> {
+  let body: { chat_session_id?: unknown; parent_message_id?: unknown; prompt?: unknown };
   try {
-    const body = JSON.parse(bodyStr) as { chat_session_id?: unknown; parent_message_id?: unknown; prompt?: unknown };
-    const sessionId = typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
-      ? body.chat_session_id.trim()
-      : getCurrentChatSessionId();
-    if (!sessionId) return null;
-    const bindPendingProject = body.parent_message_id === null;
-    const project = await sendRuntimeMessage<ResolvedProjectAugmentationContext | null>({
-      type: 'GET_PROJECT_CONTEXT_FOR_CONVERSATION',
-      payload: {
-        bindPendingProject,
-        conversation: {
-          conversationId: sessionId,
-          title: getCurrentConversationTitle(),
-          url: location.href,
-        },
-      },
-    });
-    return project ?? null;
+    body = JSON.parse(bodyStr) as { chat_session_id?: unknown; parent_message_id?: unknown; prompt?: unknown };
   } catch {
     return null;
   }
+
+  const sessionId = typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
+    ? body.chat_session_id.trim()
+    : getCurrentChatSessionId();
+  if (!sessionId) return null;
+
+  const bindPendingProject = body.parent_message_id === null;
+  const project = await sendRuntimeMessageStrict<ResolvedProjectAugmentationContext | null>({
+    type: 'GET_PROJECT_CONTEXT_FOR_CONVERSATION',
+    payload: {
+      bindPendingProject,
+      conversation: {
+        conversationId: sessionId,
+        title: getCurrentConversationTitle(),
+        url: location.href,
+      },
+    },
+  });
+  return project ?? null;
 }
 
 function postToMainWorld(message: Record<string, unknown>): void {
@@ -1517,6 +1520,29 @@ async function sendRuntimeMessage<T>(message: unknown): Promise<T | undefined> {
     }
     return undefined;
   }
+}
+
+async function sendRuntimeMessageStrict<T>(message: unknown): Promise<T> {
+  if (!hasLiveExtensionContext()) {
+    throw new Error('Extension context is unavailable.');
+  }
+
+  try {
+    const result = await chrome.runtime.sendMessage(message);
+    if (isRuntimeFailureResponse(result)) {
+      throw new Error(result.error ? String(result.error) : 'Runtime request failed.');
+    }
+    return result as T;
+  } catch (error) {
+    if (isExtensionInvalidatedError(error)) {
+      invalidateExtensionContext();
+    }
+    throw error;
+  }
+}
+
+function isRuntimeFailureResponse(value: unknown): value is { ok: false; error?: unknown } {
+  return Boolean(value && typeof value === 'object' && (value as { ok?: unknown }).ok === false);
 }
 
 async function getLocalStorageValue<T>(key: string): Promise<T | undefined> {

@@ -105,6 +105,7 @@ export interface AutomationRunnerRequest {
 export interface AutomationPromptContext {
   memories?: Memory[];
   presetContent?: string | null;
+  projectContext?: string | null;
   toolDescriptors?: ToolDescriptor[];
 }
 

@@ -4,10 +4,12 @@ import {
   saveMemory,
   updateMemory,
   deleteMemory,
+  deleteMemoriesForProject,
   touchMemories,
   replaceAllMemories,
   archiveStaleMemories,
 } from '../core/memory/store';
+import { filterMemoriesByProjectScope } from '../core/memory/scope';
 import {
   deleteGitHubSkillSource,
   getAllSkillSources,
@@ -845,8 +847,10 @@ async function handleMessage(
     case 'DELETE_PROJECT_CONTEXT': {
       const { projectId } = message.payload as { projectId: string };
       await deleteProjectContext(projectId);
+      const deletedMemories = await deleteMemoriesForProject(projectId);
       await broadcastProjectContextUpdate(sender.tab?.id);
-      return { ok: true };
+      if (deletedMemories > 0) await broadcastStateUpdate(sender.tab?.id);
+      return { ok: true, deletedMemories };
     }
 
     case 'ADD_CONVERSATION_TO_PROJECT': {
@@ -1587,13 +1591,20 @@ async function executeAutomationWithContext(
     getRuntimeToolDescriptors(currentBackgroundLocale),
   ]);
   const enabledDescriptors = toolDescriptors.filter((descriptor) => descriptor.execution.enabled);
+  const [project, projectPromptContext] = request.chatSessionId
+    ? await Promise.all([
+      getProjectForConversation(request.chatSessionId),
+      getProjectPromptContextForConversation(request.chatSessionId),
+    ])
+    : [null, null];
 
   return runDeepSeekAutomation({
     ...request,
     locale: currentBackgroundLocale,
     promptContext: {
-      memories,
+      memories: filterMemoriesByProjectScope(memories, project?.id ?? null),
       presetContent: activePreset?.content ?? null,
+      projectContext: projectPromptContext ? formatProjectPromptContext(projectPromptContext) : null,
       toolDescriptors: enabledDescriptors,
     },
   }, {

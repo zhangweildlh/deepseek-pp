@@ -8,6 +8,7 @@ import {
 } from '../prompt/settings';
 import { parseSkillCommand } from '../skill/parser';
 import type { Memory, ModelType, Skill, SystemPromptPreset, ToolDescriptor } from '../types';
+import { filterMemoriesByProjectScope } from '../memory/scope';
 
 export interface RequestAugmentationState {
   memories: Memory[];
@@ -115,13 +116,6 @@ export function augmentRequestBody(
     usedMemoryIds,
     messageCount,
   };
-}
-
-function filterMemoriesByProjectScope(memories: Memory[], projectId?: string | null): Memory[] {
-  return memories.filter((memory) => {
-    if (memory.scope === 'project') return Boolean(projectId && memory.projectId === projectId);
-    return memory.scope === undefined || memory.scope === 'global';
-  });
 }
 
 function resolveSkills(

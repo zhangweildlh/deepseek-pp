@@ -61,7 +61,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 | DeepSeek browser control | Lets DeepSeek++ operate a user-selected browser tab after the user enables the feature and chooses the target. |
 | DeepSeek memory | Automatically saves, filters, and injects long-term memory so different conversations can reuse user preferences, project context, and common facts. |
 | DeepSeek Skills / `/skill` workflows | Switches quickly between built-in, custom, and GitHub-imported Skills for expert modes and task templates. |
-| DeepSeek project context | Organizes project materials, pages, local files, or repository content as reusable context that can be attached when needed. |
+| DeepSeek project context | Groups project instructions, project memories, and related DeepSeek conversations so matching chats get the right context automatically. |
 | DeepSeek artifact downloads | Creates downloadable single files or project bundles for scripts, Markdown, JSON, HTML, and small project structures. |
 | DeepSeek conversation export | Exports the current DeepSeek conversation from the reply action row with selectable HTML, Markdown, PDF, and image-manifest outputs, including attachment references and metadata. |
 | DeepSeek saved snippets | Saves snippets, bookmarks, and reusable prompts that can be searched, inserted into chat, and exported as Markdown or JSON. |
@@ -99,12 +99,12 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 
 ### Project Context and Downloadable Artifacts
 
-- **Project library** - Maintain project context in the side panel by grouping repository, web-page, local-file, and manual notes under one project.
-- **Attach when useful** - Bring only task-relevant project material into a conversation instead of pasting the same background repeatedly.
-- **File and source management** - Review, enable, disable, or replace project material when switching between tasks.
+- **Project context** - Maintain project names, descriptions, and instructions in the side panel, then add related DeepSeek conversations to each project.
+- **Project-aware chats** - Conversations assigned to a project automatically receive that project's instructions and project memories.
+- **Project memory management** - Add, edit, pin, or delete memories that belong only to the selected project.
 - **Single-file artifacts** - Ask DeepSeek++ to create downloadable scripts, Markdown, JSON, HTML, or other text files.
 - **Project bundles** - Download multi-file results as a bundle for prototypes, small tools, or documentation sets.
-- **Local-first flow** - Project material and generated artifacts are added, generated, and downloaded by the user without a DeepSeek++ backend.
+- **Local-first flow** - Project context, project memories, and generated artifacts are maintained and downloaded by the user without a DeepSeek++ backend.
 
 ### Native-Feeling Tool Calls
 
@@ -315,7 +315,7 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 
 | Area | Main changes |
 |------|--------------|
-| Project context | Organize repositories, pages, local files, and manual notes as reusable project material, then attach only the relevant slices to each task. |
+| Project context | Group project instructions, project memories, and related DeepSeek conversations so matching chats automatically receive the right background. |
 | Downloadable artifacts | Create single files or project bundles for scripts, Markdown, JSON, HTML, small prototypes, and documentation sets. |
 | Interactive tools | Sandbox approvals, Skill draft review, memory-import preview, saved snippets, and prompt controls make multi-step work easier to inspect, revise, and steer. |
 | Workspace flow | Side-panel chat, right-click scenarios, official API Key setup, restored tool results, and page navigation keep tool blocks and Agent run blocks attached to the right reply after refresh. |

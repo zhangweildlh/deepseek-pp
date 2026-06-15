@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createArtifactToolDescriptors } from '../core/artifact';
-import { XmlToolStreamFilter } from '../core/interceptor/fetch-hook';
+import { createBufferedSSEParser, XmlToolStreamFilter } from '../core/interceptor/fetch-hook';
 import { extractResponseTextFromParsed, parseSSEChunk, parseSSEData } from '../core/interceptor/sse-parser';
 
 describe('XmlToolStreamFilter', () => {
@@ -49,6 +49,20 @@ describe('XmlToolStreamFilter', () => {
     expect(output).not.toContain('fragment-demo.html');
     expect(output).not.toContain('<canvas');
     expect(readVisibleText(output)).toBe('Before  after');
+  });
+
+  it('buffers partial SSE events before parsing full-text stream state', () => {
+    const parsed: unknown[] = [];
+    const parser = createBufferedSSEParser((event) => parsed.push(event));
+    const event = sseText('Split event text');
+
+    parser.append(event.slice(0, 8));
+    parser.append(event.slice(8, 21));
+    expect(parsed).toEqual([]);
+
+    parser.append(event.slice(21));
+    expect(parsed).toHaveLength(1);
+    expect(extractResponseTextFromParsed(parsed[0])).toBe('Split event text');
   });
 });
 

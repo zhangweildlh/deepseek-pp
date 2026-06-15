@@ -900,6 +900,39 @@ export class XmlToolStreamFilter {
   }
 }
 
+function processCompleteSSEBlocks(
+  text: string,
+  onParsed: (parsed: unknown) => void,
+): void {
+  const events = parseSSEChunk(text);
+  for (const event of events) {
+    const parsed = parseSSEData(event.data);
+    if (parsed) onParsed(parsed);
+  }
+}
+
+export function createBufferedSSEParser(
+  onParsed: (parsed: unknown) => void,
+): { append(text: string): void; flush(): void } {
+  let buffer = '';
+
+  return {
+    append(text: string) {
+      buffer += text;
+      const lastBoundary = buffer.lastIndexOf('\n\n');
+      if (lastBoundary === -1) return;
+
+      const completePart = buffer.slice(0, lastBoundary + 2);
+      buffer = buffer.slice(lastBoundary + 2);
+      processCompleteSSEBlocks(completePart, onParsed);
+    },
+    flush() {
+      if (buffer.trim()) processCompleteSSEBlocks(buffer, onParsed);
+      buffer = '';
+    },
+  };
+}
+
 async function interceptFetchResponse(
   responsePromise: Promise<Response>,
   requestContext: RequestContext,
@@ -911,7 +944,6 @@ async function interceptFetchResponse(
   const decoder = new TextDecoder();
   const toolDescriptors = hookState.toolDescriptors;
   const filter = new XmlToolStreamFilter(toolDescriptors, requestContext.originalPrompt);
-  let textAccBuffer = '';
   let assistantMessageId: number | null = null;
   const responseToolState = createStreamingResponseToolState(
     toolDescriptors,
@@ -921,31 +953,19 @@ async function interceptFetchResponse(
     hookState.onResponseTokenSpeed,
     TOKEN_SPEED_EMIT_INTERVAL_MS,
   );
-
-  const processForFullText = (text: string) => {
-    textAccBuffer += text;
-    const lastBoundary = textAccBuffer.lastIndexOf('\n\n');
-    if (lastBoundary === -1) return;
-    const completePart = textAccBuffer.slice(0, lastBoundary + 2);
-    textAccBuffer = textAccBuffer.slice(lastBoundary + 2);
-
-    const events = parseSSEChunk(completePart);
-    for (const event of events) {
-      const parsed = parseSSEData(event.data);
-      if (!parsed) continue;
-      assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
-      const eventText = extractCleanResponseTextForParsing(parsed);
-      if (eventText) {
-        responseToolState.append(eventText);
-        speedTracker.append(eventText);
-      } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
-        speedTracker.append((parsed as any).v);
-      }
-      if (isStreamFinishedFromParsed(parsed)) {
-        speedTracker.finish();
-      }
+  const fullTextParser = createBufferedSSEParser((parsed) => {
+    assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
+    const eventText = extractCleanResponseTextForParsing(parsed);
+    if (eventText) {
+      responseToolState.append(eventText);
+      speedTracker.append(eventText);
+    } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
+      speedTracker.append((parsed as any).v);
     }
-  };
+    if (isStreamFinishedFromParsed(parsed)) {
+      speedTracker.finish();
+    }
+  });
 
   let cancelled = false;
 
@@ -955,29 +975,13 @@ async function interceptFetchResponse(
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
-            // Drain any remaining buffered SSE events.
-            if (textAccBuffer.trim()) {
-              const events = parseSSEChunk(textAccBuffer);
-              for (const event of events) {
-                const parsed = parseSSEData(event.data);
-                if (!parsed) continue;
-                assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
-                const eventText = extractCleanResponseTextForParsing(parsed);
-                if (eventText) {
-                  responseToolState.append(eventText);
-                  speedTracker.append(eventText);
-                } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
-                  speedTracker.append((parsed as any).v);
-                }
-              }
-              textAccBuffer = '';
-            }
+            fullTextParser.flush();
             filter.flush(controller);
             break;
           }
 
           const chunk = decoder.decode(value, { stream: true });
-          processForFullText(chunk);
+          fullTextParser.append(chunk);
           filter.processChunk(chunk, controller);
         }
       } finally {
@@ -1061,6 +1065,17 @@ function setupXHRResponseInterceptor(xhr: XMLHttpRequest, requestContext: Reques
       filteredResponse += new TextDecoder().decode(data);
     },
   } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  const fullTextParser = createBufferedSSEParser((parsed) => {
+    assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
+    const text = extractCleanResponseTextForParsing(parsed);
+    if (text) {
+      responseToolState.append(text);
+      speedTracker.append(text);
+    }
+    if (isStreamFinishedFromParsed(parsed)) {
+      speedTracker.finish();
+    }
+  });
 
   xhr.addEventListener('readystatechange', function () {
     if (xhr.readyState === 3 || xhr.readyState === 4) {
@@ -1068,26 +1083,13 @@ function setupXHRResponseInterceptor(xhr: XMLHttpRequest, requestContext: Reques
       const newData = raw.slice(lastLen);
       lastLen = raw.length;
       if (newData) {
-        // Track full text
-        const events = parseSSEChunk(newData);
-        for (const event of events) {
-          const parsed = parseSSEData(event.data);
-          if (!parsed) continue;
-          assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
-          const text = extractCleanResponseTextForParsing(parsed);
-          if (text) {
-            responseToolState.append(text);
-            speedTracker.append(text);
-          }
-          if (isStreamFinishedFromParsed(parsed)) {
-            speedTracker.finish();
-          }
-        }
+        fullTextParser.append(newData);
         // Filter for frontend
         filter.processChunk(newData, fakeController);
       }
     }
     if (xhr.readyState === 4) {
+      fullTextParser.flush();
       filter.flush(fakeController);
       finalizeIfNeeded();
     }
