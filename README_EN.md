@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#073-release-highlights">0.7.3 Highlights</a>
+  <a href="#074-release-highlights">0.7.4 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [0.7.3 Release Highlights](#073-release-highlights)
+- [0.7.4 Release Highlights](#074-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -275,7 +275,23 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.svg" width="300" alt="Automation task side panel">
 </p>
 
-## 0.7.3 Release Highlights
+## 0.7.4 Release Highlights
+
+0.7.4 improves project organization and language control, making project conversations manageable from the DeepSeek history sidebar while giving users clearer control over the active interface language.
+
+| Area | Main changes |
+|------|--------------|
+| Project sidebar | Adds a Projects section to the DeepSeek history sidebar, with expandable projects and linked conversations available directly from the page. |
+| Conversation organization | Move the current conversation into or out of a project, or choose which project context should apply to the next new conversation. |
+| Native menu integration | Adds project actions to DeepSeek's native conversation menu so history items can be added to or removed from projects quickly. |
+| Language settings | Adds an Interface language section in Settings with Follow, Simplified Chinese, and English options plus the currently active language. |
+| Stability | Tightens project sidebar rendering, menu clicks, history-title extraction, and repeated refresh handling to reduce flicker, wrong hiding, and timestamp noise in titles. |
+| Regression coverage | Adds tests for project sidebar management, native-menu project actions, language copy, and history-title extraction. |
+
+<details>
+<summary>Show 0.7.3 release highlights</summary>
+
+### 0.7.3 Release Highlights
 
 0.7.3 focuses on project context and permission cleanup, helping project instructions, project memories, and related DeepSeek conversations work together more reliably while reducing the Browser Control permission footprint and strengthening memory, automation, and long-task continuation coverage.
 
@@ -287,6 +303,8 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Automation and continuation | Automation task state, long-task continuation, and tool-result handoff are more stable for multi-step or scheduled workflows. |
 | Streaming output | Tool-call handling and context injection during long replies are cleaner, reducing visible technical markers and output interruptions. |
 | Regression coverage | Adds and strengthens tests for project context, project memory scope, Browser Control permissions, sync data, automation state, and streamed tool text. |
+
+</details>
 
 <details>
 <summary>Show 0.7.2 release highlights</summary>
