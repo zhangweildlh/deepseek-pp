@@ -34,6 +34,8 @@ const HISTORY_LINK_SELECTOR = [
   'a[href*="/a/chat/s/"]',
   'a[href*="chat_session_id="]',
 ].join(',');
+const SYNTHETIC_HISTORY_SURFACE_SELECTOR = '[data-dpp-history-synthetic="true"]';
+const PROJECT_SIDEBAR_HIDDEN_ATTR = 'data-dpp-project-sidebar-hidden';
 const OFFICIAL_SEARCH_OPTION_SELECTOR = '[role="option"]';
 
 export function normalizeHistoryOrganizerState(value: unknown): HistoryOrganizerState {
@@ -54,11 +56,12 @@ export function extractHistoryItems(root: ParentNode, state: HistoryOrganizerSta
   const seen = new Set<string>();
   const items: HistoryItem[] = [];
   for (const anchor of Array.from(root.querySelectorAll<HTMLAnchorElement>(HISTORY_LINK_SELECTOR))) {
+    if (anchor.closest(SYNTHETIC_HISTORY_SURFACE_SELECTOR)) continue;
     const sessionId = parseSessionId(anchor.href);
     if (!sessionId || seen.has(sessionId)) continue;
     seen.add(sessionId);
     const element = findHistoryRow(anchor);
-    const title = normalizeTitle(element.textContent || anchor.textContent || sessionId);
+    const title = normalizeTitle(anchor.textContent || element.textContent || sessionId);
     items.push({
       sessionId,
       title,
@@ -99,7 +102,9 @@ export function startDeepSeekHistoryOrganizer(
     if (stopped) return;
     const items = extractHistoryItems(document, state);
     for (const item of items) {
-      item.element.hidden = false;
+      if (item.element.getAttribute(PROJECT_SIDEBAR_HIDDEN_ATTR) !== 'true') {
+        item.element.hidden = false;
+      }
       item.element.dataset.dppHistoryTags = item.tags.join(', ');
     }
 

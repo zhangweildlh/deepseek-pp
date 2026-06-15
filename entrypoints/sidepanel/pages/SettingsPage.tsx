@@ -4,6 +4,7 @@ import {
   clampBackgroundOpacity,
   normalizeBackgroundConfig,
 } from '../../../core/background/config';
+import type { LocalePreference } from '../../../core/i18n';
 import {
   DEFAULT_PET_CONFIG,
   clampPetOpacity,
@@ -39,7 +40,12 @@ const DEFAULT_BACKGROUND_CONFIG: BackgroundConfig = {
 type SyncStatus = 'idle' | 'testing' | 'uploading' | 'downloading' | 'success' | 'error';
 
 export default function SettingsPage() {
-  const { t, locale } = useI18n();
+  const {
+    t,
+    locale,
+    preference: localePreference,
+    setPreference: setLocalePreference,
+  } = useI18n();
   const [memoryCount, setMemoryCount] = useState(0);
   const [version, setVersion] = useState('');
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(DEFAULT_SYNC_CONFIG);
@@ -492,6 +498,14 @@ export default function SettingsPage() {
     petPositionItems.push({ key: 'custom', label: t('sidepanel.settings.positionCustom') });
   }
   const petPositionGridClass = `grid gap-2 ${petPosition === 'custom' ? 'grid-cols-3' : 'grid-cols-2'}`;
+  const currentLanguageLabel = locale === 'en'
+    ? t('sidepanel.settings.languageEnglish')
+    : t('sidepanel.settings.languageChinese');
+  const languageOptions: Array<{ value: LocalePreference; label: string }> = [
+    { value: 'auto', label: t('sidepanel.settings.languageAuto') },
+    { value: 'zh-CN', label: t('sidepanel.settings.languageChinese') },
+    { value: 'en', label: t('sidepanel.settings.languageEnglish') },
+  ];
 
   return (
     <div className="p-4 space-y-5">
@@ -500,6 +514,49 @@ export default function SettingsPage() {
         description={t('sidepanel.settings.description')}
         meta={version ? `v${version}` : undefined}
       />
+
+      <section className="space-y-3">
+        <h2 className="text-[13px] font-medium" style={{ color: 'var(--ds-text)' }}>
+          {t('sidepanel.settings.interfaceSection')}
+        </h2>
+
+        <div className="ds-surface-panel rounded-xl p-4 space-y-3">
+          <div>
+            <div className="text-xs font-medium" style={{ color: 'var(--ds-text)' }}>
+              {t('sidepanel.settings.interfaceLanguage')}
+            </div>
+            <div className="text-[11px] mt-0.5" style={{ color: 'var(--ds-text-tertiary)' }}>
+              {t('sidepanel.settings.interfaceLanguageDescription')}
+            </div>
+            <div className="text-[11px] mt-1" style={{ color: 'var(--ds-text-secondary)' }}>
+              {t('sidepanel.settings.languageCurrent', { language: currentLanguageLabel })}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('sidepanel.settings.interfaceLanguage')}>
+            {languageOptions.map((option) => {
+              const active = localePreference === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => void setLocalePreference(option.value)}
+                  className="min-w-0 px-2 py-2.5 text-[11px] leading-tight font-medium rounded-lg border transition-all duration-150"
+                  style={{
+                    background: active ? 'var(--ds-blue-light)' : 'var(--ds-bg)',
+                    color: active ? 'var(--ds-blue)' : 'var(--ds-text-secondary)',
+                    borderColor: active ? 'var(--ds-selected-border)' : 'var(--ds-border)',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-[13px] font-medium" style={{ color: 'var(--ds-text)' }}>

@@ -72,6 +72,7 @@ import {
 } from '../core/tool/restore-block';
 import { validateBridgeMessage } from '../core/messaging/schema';
 import { startDeepSeekHistoryOrganizer, type HistoryOrganizerController } from './content/adapters/history-organizer';
+import { startDeepSeekProjectSidebarOrganizer, type ProjectSidebarOrganizerController } from './content/adapters/project-sidebar-organizer';
 import { startContentUxPolish, type ContentUxPolishController } from './content/adapters/ux-polish';
 
 import { createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
@@ -212,6 +213,7 @@ let exportActionMenuEl: HTMLElement | null = null;
 let exportActionMenuButton: HTMLButtonElement | null = null;
 let exportActionMenuSessionId: string | null = null;
 let historyOrganizerController: HistoryOrganizerController | null = null;
+let projectSidebarOrganizerController: ProjectSidebarOrganizerController | null = null;
 let contentUxPolishController: ContentUxPolishController | null = null;
 const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -282,6 +284,7 @@ function refreshLocalizedContentSurfaces(): void {
     showConversationExportMenu(exportActionMenuButton);
   }
   historyOrganizerController?.refreshLabels();
+  projectSidebarOrganizerController?.refreshLabels();
   contentUxPolishController?.refreshLabels();
   renderTokenSpeedIndicator(lastTokenSpeedProgress);
   renderActiveToolBlockForCurrentRoute();
@@ -321,12 +324,46 @@ function getHistoryOrganizerLabels() {
   };
 }
 
+function getProjectSidebarOrganizerLabels() {
+  return {
+    title: contentT('content.projectSidebar.title'),
+    empty: contentT('content.projectSidebar.empty'),
+    expandProject: (name: string) => contentT('content.projectSidebar.expandProject', { name }),
+    collapseProject: (name: string) => contentT('content.projectSidebar.collapseProject', { name }),
+    showMore: contentT('content.projectSidebar.showMore'),
+    showLess: contentT('content.projectSidebar.showLess'),
+    moveCurrentToProject: (name: string) => contentT('content.projectSidebar.moveCurrentToProject', { name }),
+    removeCurrentFromProject: (name: string) => contentT('content.projectSidebar.removeCurrentFromProject', { name }),
+    joinProject: contentT('content.projectSidebar.joinProject'),
+    joinProjectNamed: (name: string) => contentT('content.projectSidebar.joinProjectNamed', { name }),
+    moveToProjectNamed: (name: string) => contentT('content.projectSidebar.moveToProjectNamed', { name }),
+    currentProjectNamed: (name: string) => contentT('content.projectSidebar.currentProjectNamed', { name }),
+    removeFromProjectNamed: (name: string) => contentT('content.projectSidebar.removeFromProjectNamed', { name }),
+    conversationActions: contentT('content.projectSidebar.conversationActions'),
+    useNextConversation: (name: string) => contentT('content.projectSidebar.useNextConversation', { name }),
+    cancelNextConversation: (name: string) => contentT('content.projectSidebar.cancelNextConversation', { name }),
+    pendingNextConversation: contentT('content.projectSidebar.pendingNextConversation'),
+    untitledConversation: contentT('content.conversation.untitled'),
+    operationFailed: (message: string) => contentT('content.projectSidebar.operationFailed', { message }),
+    age: (timestamp: number) => formatContentAge(timestamp),
+  };
+}
+
 function getContentUxPolishLabels() {
   return {
     codeDownloadButton: contentT('content.uxPolish.downloadCode'),
     messageMarkdownButton: contentT('content.uxPolish.downloadMessageMarkdownButton'),
     messageMarkdownTitle: contentT('content.uxPolish.downloadMessageMarkdownTitle'),
   };
+}
+
+function formatContentAge(timestamp: number): string {
+  const mins = Math.floor((Date.now() - timestamp) / 60000);
+  if (mins < 1) return contentT('sidepanel.memory.age.justNow');
+  if (mins < 60) return contentT('sidepanel.memory.age.minutesAgo', { count: mins });
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return contentT('sidepanel.memory.age.hoursAgo', { count: hours });
+  return contentT('sidepanel.memory.age.daysAgo', { count: Math.floor(hours / 24) });
 }
 
 export default defineContentScript({
@@ -434,6 +471,7 @@ export default defineContentScript({
     startToolBlockRouteWatcher();
     startConversationExportActionInjector();
     historyOrganizerController = startDeepSeekHistoryOrganizer(getHistoryOrganizerLabels);
+    projectSidebarOrganizerController = startDeepSeekProjectSidebarOrganizer(getProjectSidebarOrganizerLabels);
     contentUxPolishController = startContentUxPolish(getContentUxPolishLabels);
 
     startRenderedToolCallCleaner();
@@ -727,6 +765,8 @@ function invalidateExtensionContext() {
   stopConversationExportActionInjector();
   historyOrganizerController?.stop();
   historyOrganizerController = null;
+  projectSidebarOrganizerController?.stop();
+  projectSidebarOrganizerController = null;
   contentUxPolishController?.stop();
   contentUxPolishController = null;
 }
