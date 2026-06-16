@@ -45,7 +45,6 @@ export async function runDeepSeekAutomation(
     parentMessageId = normalizeMessageId(request.parentMessageId, 'parent_message_id');
     const clientHeaders = createClientHeaders({ missingTokenMessage: AUTOMATION_MISSING_TOKEN_MESSAGE });
     chatSessionId ??= await createChatSession(clientHeaders);
-    const headers = await createPowHeaders(clientHeaders);
     const { augmented: prompt } = buildPromptAugmentation(request.prompt, {
       memories: request.promptContext?.memories ?? [],
       presetContent: request.promptContext?.presetContent ?? null,
@@ -60,7 +59,6 @@ export async function runDeepSeekAutomation(
       parentMessageId,
       prompt,
       clientHeaders,
-      headers,
     );
     const assistantMessageId = stream.responseMessageId;
     if (assistantMessageId === null) {
@@ -80,7 +78,6 @@ export async function runDeepSeekAutomation(
       assistantMessageId,
       stream.assistantText,
       clientHeaders,
-      headers,
       locale,
     );
     stream = toolLoop.stream;
@@ -131,8 +128,8 @@ async function submitAutomationPrompt(
   parentMessageId: number | null,
   prompt: string,
   clientHeaders: Record<string, string>,
-  powHeaders: Record<string, string>,
 ): Promise<ModelTurn> {
+  const powHeaders = await createPowHeaders(clientHeaders);
   return submitPrompt({
     chatSessionId,
     parentMessageId,
@@ -153,7 +150,6 @@ async function runAutomationToolLoop(
   assistantMessageId: number,
   assistantText: string,
   clientHeaders: Record<string, string>,
-  powHeaders: Record<string, string>,
   locale: SupportedLocale,
 ): Promise<{ stream: ModelTurn; executions: ToolExecutionRecord[] }> {
   const initialTurn: ModelTurn = {
@@ -196,7 +192,6 @@ async function runAutomationToolLoop(
       parentMessageId,
       prompt,
       clientHeaders,
-      powHeaders,
     ),
   });
 

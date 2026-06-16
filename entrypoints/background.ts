@@ -1829,8 +1829,6 @@ async function handleWebChatSubmitPrompt(prompt: string, excludeTabId?: number) 
 
     const { augmented, enabledDescriptors } = await buildSidepanelPrompt(prompt);
 
-    const powHeaders = await createPowHeaders(headers);
-
     const initialInput = {
       chatSessionId,
       parentMessageId: chatParentMessageId,
@@ -1840,7 +1838,6 @@ async function handleWebChatSubmitPrompt(prompt: string, excludeTabId?: number) 
       thinkingEnabled: false,
       searchEnabled: false,
       clientHeaders: headers,
-      powHeaders,
     };
 
     await runSidepanelToolLoop(initialInput, enabledDescriptors, excludeTabId);
@@ -2009,7 +2006,6 @@ async function runSidepanelToolLoop(
     thinkingEnabled: boolean;
     searchEnabled: boolean;
     clientHeaders: Record<string, string>;
-    powHeaders: Record<string, string>;
   },
   toolDescriptors: ToolDescriptor[],
   excludeTabId?: number,
@@ -2020,7 +2016,10 @@ async function runSidepanelToolLoop(
 
   for (let step = 0; step < MAX_STEPS; step++) {
     let accumulated = '';
-    const turn = await submitPromptStreaming(currentInput, {
+    const turn = await submitPromptStreaming({
+      ...currentInput,
+      powHeaders: await createPowHeaders(currentInput.clientHeaders),
+    }, {
       onTextChunk(newText: string, fullText: string) {
         accumulated = fullText;
         broadcastChatChunk({ text: newText, done: false }, excludeTabId);
