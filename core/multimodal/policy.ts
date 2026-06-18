@@ -1,5 +1,9 @@
-import type { McpServerCreateInput } from '../mcp/types';
-import { MULTIMODAL_MCP_NATIVE_HOST, MULTIMODAL_MCP_SERVER_NAME } from './contracts';
+import type { McpServerConfig, McpServerCreateInput, McpToolAllowlist } from '../mcp/types';
+import {
+  MULTIMODAL_MCP_NATIVE_HOST,
+  MULTIMODAL_MCP_SERVER_NAME,
+  type MultimodalToolName,
+} from './contracts';
 import { MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN, type MultimodalMediaKind } from './media';
 
 export const MULTIMODAL_MCP_CONNECT_TIMEOUT_MS = 5_000;
@@ -11,6 +15,32 @@ export const MULTIMODAL_REQUEST_AUGMENTATION_MAX_TIMEOUT_MS =
 
 export interface MultimodalRequestAugmentationMedia {
   kind: MultimodalMediaKind;
+}
+
+export type MultimodalMcpServerAvailability = Pick<
+  McpServerConfig,
+  'displayName' | 'enabled' | 'transport' | 'execution' | 'allowlist'
+>;
+
+const MULTIMODAL_ANALYSIS_TOOL_NAMES: readonly MultimodalToolName[] = ['analyze_images', 'analyze_video'];
+
+export function isMultimodalMcpServer(
+  server: Pick<McpServerConfig, 'displayName' | 'transport'>,
+): boolean {
+  return server.displayName === MULTIMODAL_MCP_SERVER_NAME ||
+    server.transport.nativeHost === MULTIMODAL_MCP_NATIVE_HOST;
+}
+
+export function canUseMultimodalMediaInput(server: MultimodalMcpServerAvailability): boolean {
+  return isMultimodalMcpServer(server) &&
+    server.enabled &&
+    server.execution.enabled &&
+    server.execution.mode !== 'disabled' &&
+    isMultimodalAnalysisToolAllowed(server.allowlist);
+}
+
+export function isMultimodalAnalysisToolAllowed(allowlist: McpToolAllowlist): boolean {
+  return MULTIMODAL_ANALYSIS_TOOL_NAMES.some((toolName) => isToolAllowedByAllowlist(allowlist, toolName));
 }
 
 export function calculateMultimodalRequestAugmentationTimeoutMs(
@@ -61,4 +91,11 @@ export function createMultimodalMcpPresetInput(
       mode: 'manual',
     },
   };
+}
+
+function isToolAllowedByAllowlist(allowlist: McpToolAllowlist, toolName: string): boolean {
+  const selected = allowlist.toolNames.includes(toolName);
+  if (allowlist.mode === 'all') return true;
+  if (allowlist.mode === 'allow') return selected;
+  return !selected;
 }

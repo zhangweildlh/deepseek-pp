@@ -138,6 +138,36 @@ export function extractResponseTextFromParsed(parsed: any): string | null {
   return null;
 }
 
+export function extractResponseTextForTokenSpeed(parsed: unknown): string | null {
+  const value = parsed as { o?: unknown; p?: unknown; v?: unknown } | null;
+  if (value && typeof value === 'object' && value.o === 'BATCH' && Array.isArray(value.v)) {
+    const text = value.v
+      .map((item) => extractResponseTextForTokenSpeed(item))
+      .filter((part: string | null): part is string => part !== null)
+      .join('');
+    return text.length > 0 ? text : null;
+  }
+
+  const responseText = extractResponseTextFromParsed(parsed as any);
+  if (responseText) return responseText;
+
+  if (!value || typeof value !== 'object') return null;
+
+  if (Array.isArray(value.v)) {
+    const text = value.v
+      .map((item) => extractResponseTextForTokenSpeed(item))
+      .filter((part: string | null): part is string => part !== null)
+      .join('');
+    return text.length > 0 ? text : null;
+  }
+
+  if (isThinkingPatchPath(value.p) && typeof value.v === 'string') {
+    return value.v;
+  }
+
+  return null;
+}
+
 function isFragmentsAppendPatch(parsed: any): boolean {
   return typeof parsed?.p === 'string' &&
     parsed.p.endsWith('/fragments') &&

@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canUseMultimodalMediaInput,
   calculateMultimodalRequestAugmentationTimeoutMs,
   createMultimodalMcpPresetInput,
+  isMultimodalAnalysisToolAllowed,
+  isMultimodalMcpServer,
   MULTIMODAL_MCP_CONNECT_TIMEOUT_MS,
   MULTIMODAL_MCP_DISCOVERY_TIMEOUT_MS,
   MULTIMODAL_MCP_REQUEST_TIMEOUT_MS,
   MULTIMODAL_REQUEST_AUGMENTATION_MAX_TIMEOUT_MS,
   MULTIMODAL_REQUEST_AUGMENTATION_TIMEOUT_MS,
+  type MultimodalMcpServerAvailability,
 } from '../core/multimodal/policy';
 import { MULTIMODAL_MCP_NATIVE_HOST, MULTIMODAL_MCP_SERVER_NAME } from '../core/multimodal/contracts';
 
@@ -27,6 +31,42 @@ describe('createMultimodalMcpPresetInput', () => {
     });
     expect(preset.allowlist).toEqual({ mode: 'allow', toolNames: ['vision_status'] });
     expect(preset.execution).toEqual({ enabled: false, mode: 'manual' });
+  });
+});
+
+describe('multimodal MCP availability', () => {
+  it('identifies the built-in multimodal server by name or native host', () => {
+    expect(isMultimodalMcpServer(createServer())).toBe(true);
+    expect(isMultimodalMcpServer(createServer({
+      displayName: 'Custom Vision',
+      transport: { kind: 'native_messaging', nativeHost: MULTIMODAL_MCP_NATIVE_HOST },
+    }))).toBe(true);
+    expect(isMultimodalMcpServer(createServer({
+      displayName: 'Other MCP',
+      transport: { kind: 'native_messaging', nativeHost: 'com.example.other' },
+    }))).toBe(false);
+  });
+
+  it('requires an enabled server, enabled execution, and an allowed analysis tool before showing media input', () => {
+    expect(canUseMultimodalMediaInput(createServer())).toBe(true);
+    expect(canUseMultimodalMediaInput(createServer({ enabled: false }))).toBe(false);
+    expect(canUseMultimodalMediaInput(createServer({
+      execution: { enabled: false, mode: 'manual' },
+    }))).toBe(false);
+    expect(canUseMultimodalMediaInput(createServer({
+      execution: { enabled: true, mode: 'disabled' },
+    }))).toBe(false);
+    expect(canUseMultimodalMediaInput(createServer({
+      allowlist: { mode: 'allow', toolNames: ['vision_status'] },
+    }))).toBe(false);
+  });
+
+  it('treats analyze_images or analyze_video as the actual media-analysis capability', () => {
+    expect(isMultimodalAnalysisToolAllowed({ mode: 'allow', toolNames: ['analyze_images'] })).toBe(true);
+    expect(isMultimodalAnalysisToolAllowed({ mode: 'allow', toolNames: ['analyze_video'] })).toBe(true);
+    expect(isMultimodalAnalysisToolAllowed({ mode: 'allow', toolNames: ['vision_status'] })).toBe(false);
+    expect(isMultimodalAnalysisToolAllowed({ mode: 'deny', toolNames: ['vision_status'] })).toBe(true);
+    expect(isMultimodalAnalysisToolAllowed({ mode: 'deny', toolNames: ['analyze_images', 'analyze_video'] })).toBe(false);
   });
 });
 
@@ -55,3 +95,25 @@ describe('calculateMultimodalRequestAugmentationTimeoutMs', () => {
     )).toBe(MULTIMODAL_REQUEST_AUGMENTATION_MAX_TIMEOUT_MS);
   });
 });
+
+function createServer(
+  overrides: Partial<MultimodalMcpServerAvailability> = {},
+): MultimodalMcpServerAvailability {
+  return {
+    displayName: MULTIMODAL_MCP_SERVER_NAME,
+    enabled: true,
+    transport: {
+      kind: 'native_messaging',
+      nativeHost: MULTIMODAL_MCP_NATIVE_HOST,
+    },
+    execution: {
+      enabled: true,
+      mode: 'manual',
+    },
+    allowlist: {
+      mode: 'allow',
+      toolNames: ['analyze_images'],
+    },
+    ...overrides,
+  };
+}

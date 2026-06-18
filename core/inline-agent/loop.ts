@@ -8,6 +8,7 @@ import {
 import { extractToolCalls } from '../interceptor/tool-parser';
 import { createStreamingToolTextAccumulator } from '../interceptor/streaming-tool-text';
 import { createStreamingToolCallParser } from '../interceptor/streaming-tool-call-parser';
+import type { ResponseTokenSpeedPayload } from '../interceptor/token-speed';
 import { DEFAULT_LOCALE } from '../i18n';
 import { executeToolCallsSequentially } from '../tool-loop/engine';
 import type { ToolCall, ToolDescriptor, ToolExecutionRecord } from '../types';
@@ -102,6 +103,9 @@ export async function runInlineAgentLoop(
       const stepTimeout = createStepSignal(signal);
       const turn: ModelTurn = await submitPromptStreaming(input, {
         retainAssistantText: false,
+        onTokenSpeed(progress) {
+          postAgentTokenSpeed(post, payload, `step:${step}`, progress);
+        },
         onTextChunk(text) {
           streamState.onTextChunk(text);
         },
@@ -185,6 +189,9 @@ export async function runInlineAgentLoop(
         const nudgeTimeout = createStepSignal(signal);
         const nudgeTurn = await submitPromptStreaming(nudgeInput, {
           retainAssistantText: false,
+          onTokenSpeed(progress) {
+            postAgentTokenSpeed(post, payload, `step:${step}:nudge:${nudgeCount}`, progress);
+          },
           onTextChunk(text) {
             nudgeStreamState.onTextChunk(text);
           },
@@ -299,6 +306,9 @@ export async function runInlineAgentLoop(
         });
         const finalTurn = await submitPromptStreaming(finalInput, {
           retainAssistantText: false,
+          onTokenSpeed(progress) {
+            postAgentTokenSpeed(post, payload, `step:${totalSteps}:final`, progress);
+          },
           onTextChunk(text) {
             if (!text.trim()) return;
             if (!finalStepStarted) {
@@ -358,6 +368,20 @@ export async function runInlineAgentLoop(
       error: err instanceof Error ? err.message : String(err),
     } satisfies InlineAgentLoopErrorMsg);
   }
+}
+
+function postAgentTokenSpeed(
+  post: PostFn,
+  payload: InlineAgentStartPayload,
+  requestKey: string,
+  progress: ResponseTokenSpeedPayload,
+): void {
+  post('AGENT_TOKEN_SPEED', {
+    ...progress,
+    requestId: `agent:${payload.loopId}:${requestKey}`,
+    chatSessionId: payload.chatSessionId,
+    modelType: progress.modelType ?? payload.promptOptions.modelType,
+  } satisfies ResponseTokenSpeedPayload);
 }
 
 function createInlineAgentStreamState(input: {

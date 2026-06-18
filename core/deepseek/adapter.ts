@@ -1,10 +1,16 @@
 import { DEEPSEEK_API_URL } from '../constants';
 import {
+  extractResponseUsageStatsFromParsed,
+  extractResponseTextForTokenSpeed,
   extractResponseTextFromParsed,
   isStreamFinishedFromParsed,
   parseSSEChunk,
   parseSSEData,
 } from '../interceptor/sse-parser';
+import {
+  createResponseTokenSpeedTracker,
+  type ResponseTokenSpeedPayload,
+} from '../interceptor/token-speed';
 import {
   solvePowChallengeLocally,
   type PowAnswer,
@@ -20,6 +26,7 @@ const DEFAULT_APP_VERSION = '2.0.0';
 const DEEPSEEK_CLIENT_PLATFORM = 'web';
 const USER_TOKEN_STORAGE_KEY = 'userToken';
 const SUPPORTED_MODEL_TYPES = new Set(['DEFAULT', 'default', 'expert', 'vision']);
+const TOKEN_SPEED_EMIT_INTERVAL_MS = 250;
 export const BYPASS_HOOK_HEADER = 'X-DPP-Bypass-Hook';
 
 let rememberedClientHeaders: Record<string, string> | null = null;
@@ -59,6 +66,7 @@ export interface SubmitPromptInput {
 
 export interface StreamCallbacks {
   onTextChunk?(text: string, fullText: string): void;
+  onTokenSpeed?(progress: ResponseTokenSpeedPayload): void;
   onFinished?(): void;
   retainAssistantText?: boolean;
 }
@@ -271,7 +279,20 @@ export async function submitPromptStreaming(
     throw new DeepSeekPayloadError('DeepSeek completion response did not include a stream body.', { retryable: true });
   }
 
-  return readCompletionStreamWithCallbacks(response, callbacks);
+  const decoratedCallbacks = callbacks.onTokenSpeed
+    ? {
+      ...callbacks,
+      onTokenSpeed(progress: ResponseTokenSpeedPayload) {
+        callbacks.onTokenSpeed?.({
+          ...progress,
+          chatSessionId: input.chatSessionId,
+          modelType: progress.modelType ?? input.modelType,
+        });
+      },
+    }
+    : callbacks;
+
+  return readCompletionStreamWithCallbacks(response, decoratedCallbacks);
 }
 
 export async function readHistorySnapshot(
@@ -357,29 +378,47 @@ async function readCompletionStreamWithCallbacks(
   let buffer = '';
   const summary: ModelTurn = { assistantText: '', responseMessageId: null, requestMessageId: null, finished: false };
   const retainAssistantText = callbacks.retainAssistantText !== false;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const boundary = buffer.lastIndexOf('\n\n');
-    if (boundary === -1) continue;
-
-    const complete = buffer.slice(0, boundary + 2);
-    buffer = buffer.slice(boundary + 2);
-
-    const newText = consumeSSEText(complete, summary, { retainAssistantText });
-    if (newText && callbacks.onTextChunk) {
-      callbacks.onTextChunk(newText, summary.assistantText);
+  const speedTracker = callbacks.onTokenSpeed
+    ? createResponseTokenSpeedTracker((progress) => callbacks.onTokenSpeed?.({
+      ...progress,
+      assistantMessageId: summary.responseMessageId,
+    }), TOKEN_SPEED_EMIT_INTERVAL_MS)
+    : null;
+  const onParsed = speedTracker
+    ? (parsed: unknown, event: ReturnType<typeof parseSSEChunk>[number]) => {
+      speedTracker.updateServerStats(extractResponseUsageStatsFromParsed(parsed, event.type));
+      const tokenText = extractResponseTextForTokenSpeed(parsed);
+      if (tokenText) speedTracker.append(tokenText);
+      if (isStreamFinishedFromParsed(parsed)) speedTracker.finish();
     }
-  }
+    : undefined;
 
-  if (buffer.trim()) {
-    const newText = consumeSSEText(buffer, summary, { retainAssistantText });
-    if (newText && callbacks.onTextChunk) {
-      callbacks.onTextChunk(newText, summary.assistantText);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const boundary = buffer.lastIndexOf('\n\n');
+      if (boundary === -1) continue;
+
+      const complete = buffer.slice(0, boundary + 2);
+      buffer = buffer.slice(boundary + 2);
+
+      const newText = consumeSSEText(complete, summary, { retainAssistantText, onParsed });
+      if (newText && callbacks.onTextChunk) {
+        callbacks.onTextChunk(newText, summary.assistantText);
+      }
     }
+
+    if (buffer.trim()) {
+      const newText = consumeSSEText(buffer, summary, { retainAssistantText, onParsed });
+      if (newText && callbacks.onTextChunk) {
+        callbacks.onTextChunk(newText, summary.assistantText);
+      }
+    }
+  } finally {
+    speedTracker?.finish();
   }
 
   callbacks.onFinished?.();
@@ -389,7 +428,10 @@ async function readCompletionStreamWithCallbacks(
 function consumeSSEText(
   text: string,
   summary: ModelTurn,
-  options: { retainAssistantText?: boolean } = {},
+  options: {
+    retainAssistantText?: boolean;
+    onParsed?: (parsed: unknown, event: ReturnType<typeof parseSSEChunk>[number]) => void;
+  } = {},
 ): string {
   const retainAssistantText = options.retainAssistantText !== false;
   const appendedText: string[] = [];
@@ -397,6 +439,8 @@ function consumeSSEText(
   for (const event of events) {
     const parsed = parseSSEData(event.data);
     if (!parsed) continue;
+    collectMessageIds(parsed, summary);
+    options.onParsed?.(parsed, event);
 
     const eventText = extractResponseTextFromParsed(parsed);
     if (eventText) {
@@ -404,7 +448,6 @@ function consumeSSEText(
       if (retainAssistantText) summary.assistantText += eventText;
     }
     if (isStreamFinishedFromParsed(parsed)) summary.finished = true;
-    collectMessageIds(parsed, summary);
   }
   return appendedText.join('');
 }

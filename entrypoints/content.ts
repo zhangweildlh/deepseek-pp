@@ -8,6 +8,7 @@ import type {
   PromptInjectionSettings,
   Skill,
   SystemPromptPreset,
+  McpServerConfig,
   ToolCall,
   ToolCardResult,
   ToolCallRestoreRecord,
@@ -27,6 +28,7 @@ import { augmentRequestBody } from '../core/interceptor/request-augmentation';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
 import { createRestoredArtifactToolResult, executeArtifactToolCall, isArtifactToolName } from '../core/artifact';
 import type { ResponseCompletePayload, ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
+import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/interceptor/token-speed';
 import { runInlineAgentLoop } from '../core/inline-agent/loop';
 import { replaceTaskCompleteBlocks } from '../core/inline-agent/prompt';
 import type {
@@ -88,7 +90,10 @@ import {
   type MultimodalMediaInput,
   type MultimodalMediaKind,
 } from '../core/multimodal/media';
-import { calculateMultimodalRequestAugmentationTimeoutMs } from '../core/multimodal';
+import {
+  calculateMultimodalRequestAugmentationTimeoutMs,
+  canUseMultimodalMediaInput,
+} from '../core/multimodal';
 
 import { createClientHeaders, rememberDeepSeekClientHeaders, saveClientHeadersToStorage } from '../core/deepseek/adapter';
 import type {
@@ -242,6 +247,7 @@ let multimodalMediaFileInputEl: HTMLInputElement | null = null;
 let multimodalMediaTrayEl: HTMLElement | null = null;
 let multimodalMediaStatusEl: HTMLElement | null = null;
 let multimodalMediaBusy = false;
+let multimodalMediaInputEnabled = false;
 const pendingMultimodalMedia = new Map<string, PendingMultimodalMedia>();
 let toolBlockRouteKey = '';
 let toolBlockRouteTimer: ReturnType<typeof setInterval> | null = null;
@@ -512,7 +518,7 @@ export default defineContentScript({
     startTokenSpeedIndicatorMountObserver();
     startTokenSpeedRouteWatcher();
     startToolBlockRouteWatcher();
-    startMultimodalMediaInput();
+    void refreshMultimodalMediaInputAvailability();
     startConversationExportActionInjector();
     historyOrganizerController = startDeepSeekHistoryOrganizer(getHistoryOrganizerLabels);
     projectSidebarOrganizerController = startDeepSeekProjectSidebarOrganizer(getProjectSidebarOrganizerLabels);
@@ -542,6 +548,11 @@ export default defineContentScript({
       } else if (message.type === 'TOOL_DESCRIPTORS_UPDATED') {
         syncToMainWorld(currentMemories, currentSkills, currentActivePreset, currentModelType, normalizeToolDescriptors(message.toolDescriptors), currentPromptSettings);
       } else if (message.type === 'MCP_SERVERS_UPDATED') {
+        if (Array.isArray(message.servers)) {
+          setMultimodalMediaInputEnabled(shouldEnableMultimodalMediaInput(message.servers));
+        } else {
+          void refreshMultimodalMediaInputAvailability();
+        }
         sendRuntimeMessage<ToolDescriptor[]>({ type: 'GET_TOOL_DESCRIPTORS' })
           .then((descriptors) => syncToMainWorld(currentMemories, currentSkills, currentActivePreset, currentModelType, normalizeToolDescriptors(descriptors), currentPromptSettings))
           .catch(() => undefined);
@@ -1357,13 +1368,47 @@ function getCurrentConversationTitle(): string {
   return title || contentT('content.conversation.untitled');
 }
 
+async function refreshMultimodalMediaInputAvailability() {
+  try {
+    const servers = await sendRuntimeMessageStrict<McpServerConfig[]>({ type: 'GET_MCP_SERVERS' });
+    setMultimodalMediaInputEnabled(shouldEnableMultimodalMediaInput(servers));
+  } catch (error) {
+    setMultimodalMediaInputEnabled(false);
+    if (hasLiveExtensionContext()) {
+      console.warn('[DeepSeek++] Failed to load MCP servers for multimodal media input.', error);
+    }
+  }
+}
+
+function shouldEnableMultimodalMediaInput(servers: unknown): boolean {
+  return Array.isArray(servers) &&
+    servers.some((server) => Boolean(server && typeof server === 'object') &&
+      canUseMultimodalMediaInput(server as McpServerConfig));
+}
+
+function setMultimodalMediaInputEnabled(enabled: boolean) {
+  if (multimodalMediaInputEnabled === enabled) {
+    if (enabled) mountMultimodalMediaControls();
+    return;
+  }
+
+  multimodalMediaInputEnabled = enabled;
+  if (enabled) {
+    startMultimodalMediaInput();
+    return;
+  }
+  stopMultimodalMediaInput();
+}
+
 function startMultimodalMediaInput() {
+  if (!multimodalMediaInputEnabled) return;
   injectMultimodalMediaStyles();
   mountMultimodalMediaControls();
 
   multimodalMediaObserver?.disconnect();
   multimodalMediaObserver = new MutationObserver(() => scheduleMultimodalMediaMount());
   multimodalMediaObserver.observe(document.body, { childList: true, subtree: true });
+  document.removeEventListener('paste', handleMultimodalMediaPaste, true);
   document.addEventListener('paste', handleMultimodalMediaPaste, true);
 }
 
@@ -1381,6 +1426,7 @@ function stopMultimodalMediaInput() {
 }
 
 function scheduleMultimodalMediaMount() {
+  if (!multimodalMediaInputEnabled) return;
   if (multimodalMediaMountTimer) return;
   multimodalMediaMountTimer = setTimeout(() => {
     multimodalMediaMountTimer = null;
@@ -1389,6 +1435,10 @@ function scheduleMultimodalMediaMount() {
 }
 
 function mountMultimodalMediaControls() {
+  if (!multimodalMediaInputEnabled) {
+    removeMultimodalMediaControls();
+    return;
+  }
   injectMultimodalMediaStyles();
   const inputBox = findDeepSeekInputBox();
   if (!inputBox) return;
@@ -1619,6 +1669,7 @@ function renderMultimodalMediaTray() {
 }
 
 async function addPendingMultimodalFiles(files: readonly File[], source: 'picker' | 'paste') {
+  if (!multimodalMediaInputEnabled) return;
   const mediaFiles = files.filter((file) => classifyMultimodalFile(file) !== null);
   if (mediaFiles.length === 0) return;
 
@@ -1666,6 +1717,7 @@ async function addPendingMultimodalFiles(files: readonly File[], source: 'picker
 }
 
 function handleMultimodalMediaPaste(event: ClipboardEvent) {
+  if (!multimodalMediaInputEnabled) return;
   if (!isPromptPasteTarget(event.target)) return;
   const files = extractMultimodalFilesFromDataTransfer(event.clipboardData);
   if (files.length === 0) return;
@@ -1727,6 +1779,11 @@ async function consumePendingMultimodalMediaForRequest(
   bodyStr: string,
   options: { onLongRunning?: (timeoutMs: number) => void } = {},
 ): Promise<string> {
+  if (!multimodalMediaInputEnabled) {
+    clearPendingMultimodalMedia();
+    return bodyStr;
+  }
+
   let body: Record<string, unknown>;
   try {
     body = JSON.parse(bodyStr);
@@ -2883,6 +2940,14 @@ function handleInlineAgentLoopEvent(type: string, data: unknown): void {
       setPetState('speaking');
       handleAgentStreamChunk(data as InlineAgentStreamChunkMsg);
       break;
+    case 'AGENT_TOKEN_SPEED': {
+      const progress = normalizeResponseTokenSpeedPayload(data);
+      if (progress) {
+        updateTokenSpeedIndicator(progress);
+        updatePetFromTokenSpeed(progress);
+      }
+      break;
+    }
     case 'AGENT_TOOL_DETECTED':
       break;
     case 'AGENT_STEP_COMPLETE':
@@ -3211,6 +3276,7 @@ function toFiniteNumber(value: unknown): number | null {
 }
 
 function updateTokenSpeedIndicator(progress: ResponseTokenSpeedPayload) {
+  if (shouldIgnoreEmptyTokenSpeedProgress(progress, lastTokenSpeedProgress)) return;
   tokenSpeedRouteKey = getTokenSpeedRouteKey();
   lastTokenSpeedProgress = progress;
   renderTokenSpeedIndicator(progress);

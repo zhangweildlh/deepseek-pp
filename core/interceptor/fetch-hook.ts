@@ -11,11 +11,11 @@ import {
 } from '../tool/xml-tags';
 import { stripToolCallsFromHistory, stripToolCallsFromIDBResult } from './history-cleanup';
 import {
+  extractResponseTextForTokenSpeed,
   extractResponseTextFromParsed,
   extractResponseUsageStatsFromParsed,
   isResponseTextPatchPath,
   isStreamFinishedFromParsed,
-  isThinkingPatchPath,
   parseSSEChunk,
   parseSSEData,
 } from './sse-parser';
@@ -966,12 +966,13 @@ async function interceptFetchResponse(
   const fullTextParser = createBufferedSSEParser((parsed, event) => {
     assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
     speedTracker.updateServerStats(extractResponseUsageStatsFromParsed(parsed, event.type));
+    const tokenSpeedText = extractResponseTextForTokenSpeed(parsed);
+    if (tokenSpeedText) {
+      speedTracker.append(tokenSpeedText);
+    }
     const eventText = extractCleanResponseTextForParsing(parsed);
     if (eventText) {
       responseToolState.append(eventText);
-      speedTracker.append(eventText);
-    } else if (isThinkingPatchPath((parsed as any)?.p) && typeof (parsed as any)?.v === 'string') {
-      speedTracker.append((parsed as any).v);
     }
     if (isStreamFinishedFromParsed(parsed)) {
       speedTracker.finish();
@@ -1095,10 +1096,13 @@ function setupXHRResponseInterceptor(xhr: XMLHttpRequest, requestContext: Reques
   const fullTextParser = createBufferedSSEParser((parsed, event) => {
     assistantMessageId = collectAssistantMessageId(parsed, assistantMessageId);
     speedTracker.updateServerStats(extractResponseUsageStatsFromParsed(parsed, event.type));
+    const tokenSpeedText = extractResponseTextForTokenSpeed(parsed);
+    if (tokenSpeedText) {
+      speedTracker.append(tokenSpeedText);
+    }
     const text = extractCleanResponseTextForParsing(parsed);
     if (text) {
       responseToolState.append(text);
-      speedTracker.append(text);
     }
     if (isStreamFinishedFromParsed(parsed)) {
       speedTracker.finish();

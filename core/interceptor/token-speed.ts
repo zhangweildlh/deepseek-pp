@@ -30,6 +30,15 @@ export interface ResponseTokenSpeedTracker {
   finish(): void;
 }
 
+export function shouldIgnoreEmptyTokenSpeedProgress(
+  progress: ResponseTokenSpeedPayload,
+  previous: ResponseTokenSpeedPayload,
+): boolean {
+  if (!isEmptyTokenSpeedProgress(progress)) return false;
+  if (!hasMeaningfulTokenSpeedProgress(previous)) return false;
+  return isSameTokenSpeedRequest(progress, previous);
+}
+
 export function createResponseTokenSpeedTracker(
   onProgress: (progress: ResponseTokenSpeedPayload) => void,
   emitIntervalMs: number,
@@ -162,4 +171,27 @@ function normalizeServerTimestampMs(value: unknown): number | null {
 function normalizeServerTokenCount(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
   return value;
+}
+
+function isEmptyTokenSpeedProgress(progress: ResponseTokenSpeedPayload): boolean {
+  const tokens = progress.accumulatedTokens ?? progress.estimatedTokens;
+  return tokens <= 0 && progress.textLength <= 0;
+}
+
+function hasMeaningfulTokenSpeedProgress(progress: ResponseTokenSpeedPayload): boolean {
+  const tokens = progress.accumulatedTokens ?? progress.estimatedTokens;
+  return tokens > 0 || progress.textLength > 0;
+}
+
+function isSameTokenSpeedRequest(
+  progress: ResponseTokenSpeedPayload,
+  previous: ResponseTokenSpeedPayload,
+): boolean {
+  if (progress.requestId || previous.requestId) {
+    return progress.requestId === previous.requestId;
+  }
+  if (progress.assistantMessageId !== null || previous.assistantMessageId !== null) {
+    return progress.assistantMessageId === previous.assistantMessageId;
+  }
+  return false;
 }

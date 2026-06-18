@@ -113,6 +113,21 @@ export async function executeMcpToolCall(
       },
     };
   }
+  if (!server.execution.enabled || server.execution.mode === 'disabled') {
+    return {
+      ok: false,
+      summary: 'MCP 工具执行已禁用',
+      detail: `MCP execution is disabled on server ${server.displayName}.`,
+      name: call.name,
+      provider: call.provider,
+      descriptorId: call.descriptorId,
+      error: {
+        code: 'mcp_execution_disabled',
+        message: `MCP execution is disabled on server ${server.displayName}.`,
+        retryable: false,
+      },
+    };
+  }
 
   const cache = await ensureMcpServerDiscovery(server.id);
   const descriptors = applyMcpToolPolicy(cache.descriptors, server);

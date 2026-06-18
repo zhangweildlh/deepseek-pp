@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { estimateTokenUnits, estimateTokens } from '../core/token/estimator';
 import {
   createResponseTokenSpeedTracker,
+  shouldIgnoreEmptyTokenSpeedProgress,
   type ResponseTokenSpeedPayload,
 } from '../core/interceptor/token-speed';
 import {
+  extractResponseTextForTokenSpeed,
   extractResponseUsageStatsFromParsed,
   parseSSEChunk,
   parseSSEData,
@@ -128,6 +130,56 @@ describe('createResponseTokenSpeedTracker', () => {
   });
 });
 
+describe('shouldIgnoreEmptyTokenSpeedProgress', () => {
+  it('allows a new request to reset stale token speed output even before tokens arrive', () => {
+    const previous = createProgress({
+      requestId: 'request:old',
+      estimatedTokens: 42,
+      textLength: 120,
+      active: false,
+    });
+    const nextStart = createProgress({
+      requestId: 'request:new',
+      estimatedTokens: 0,
+      textLength: 0,
+      active: true,
+    });
+
+    expect(shouldIgnoreEmptyTokenSpeedProgress(nextStart, previous)).toBe(false);
+  });
+
+  it('ignores empty repeats for the same request after meaningful progress', () => {
+    const previous = createProgress({
+      requestId: 'request:same',
+      accumulatedTokens: 120,
+      estimatedTokens: 90,
+      textLength: 300,
+      active: true,
+    });
+    const repeat = createProgress({
+      requestId: 'request:same',
+      accumulatedTokens: null,
+      estimatedTokens: 0,
+      textLength: 0,
+      active: true,
+    });
+
+    expect(shouldIgnoreEmptyTokenSpeedProgress(repeat, previous)).toBe(true);
+  });
+
+  it('does not treat anonymous empty progress as the same request', () => {
+    const previous = createProgress({
+      estimatedTokens: 24,
+      textLength: 80,
+    });
+    const anonymousStart = createProgress({
+      active: true,
+    });
+
+    expect(shouldIgnoreEmptyTokenSpeedProgress(anonymousStart, previous)).toBe(false);
+  });
+});
+
 describe('extractResponseUsageStatsFromParsed', () => {
   function parseOne(block: string) {
     const event = parseSSEChunk(block)[0];
@@ -161,5 +213,52 @@ describe('extractResponseUsageStatsFromParsed', () => {
     expect(extractResponseUsageStatsFromParsed(batch.parsed, batch.event.type)).toEqual({
       accumulatedTokenUsage: 3302,
     });
+  });
+});
+
+function createProgress(overrides: Partial<ResponseTokenSpeedPayload> = {}): ResponseTokenSpeedPayload {
+  return {
+    requestId: undefined,
+    chatSessionId: null,
+    assistantMessageId: null,
+    active: false,
+    estimatedTokens: 0,
+    accumulatedTokens: null,
+    tokensPerSecond: 0,
+    elapsedMs: 0,
+    textLength: 0,
+    tokenSource: 'estimated',
+    speedSource: 'estimated',
+    modelType: null,
+    ...overrides,
+  };
+}
+
+describe('extractResponseTextForTokenSpeed', () => {
+  it('keeps raw response text available for token speed accounting', () => {
+    const parsed = {
+      p: 'response/content',
+      o: 'APPEND',
+      v: '<artifact_create>{"filename":"demo.html","content":"<canvas></canvas>"}</artifact_create>',
+    };
+
+    expect(extractResponseTextForTokenSpeed(parsed)).toContain('artifact_create');
+  });
+
+  it('counts thinking patches even when they are not visible response content', () => {
+    expect(extractResponseTextForTokenSpeed({
+      p: 'response/fragments/0/thinking_content',
+      v: '思考内容',
+    })).toBe('思考内容');
+  });
+
+  it('combines visible and thinking text inside batch patches', () => {
+    expect(extractResponseTextForTokenSpeed({
+      o: 'BATCH',
+      v: [
+        { p: 'response/content', o: 'APPEND', v: '答案' },
+        { p: 'response/fragments/0/thinking_content', v: '思考' },
+      ],
+    })).toBe('答案思考');
   });
 });

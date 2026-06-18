@@ -129,10 +129,11 @@ import { refreshMcpServerDiscovery } from '../core/mcp/discovery';
 import { getMcpOriginPattern, requestMcpServerOriginPermission } from '../core/mcp/transports';
 import { SHELL_MCP_NATIVE_HOST, SHELL_MCP_SERVER_NAME, createShellMcpPresetInput } from '../core/shell';
 import {
-  MULTIMODAL_MCP_NATIVE_HOST,
-  MULTIMODAL_MCP_SERVER_NAME,
   MULTIMODAL_MCP_REQUEST_TIMEOUT_MS,
+  canUseMultimodalMediaInput,
   createMultimodalMcpPresetInput,
+  isMultimodalAnalysisToolAllowed,
+  isMultimodalMcpServer,
 } from '../core/multimodal';
 import {
   assertSupportedMultimodalMedia,
@@ -446,9 +447,7 @@ async function ensureBuiltInMcpPresets() {
   if (!shellExists) {
     await createMcpServer(createShellMcpPresetInput({ enabled: false }));
   }
-  const multimodalExists = servers.some((s) =>
-    s.displayName === MULTIMODAL_MCP_SERVER_NAME || s.transport.nativeHost === MULTIMODAL_MCP_NATIVE_HOST
-  );
+  const multimodalExists = servers.some(isMultimodalMcpServer);
   if (!multimodalExists) {
     await createMcpServer(createMultimodalMcpPresetInput({ enabled: false }));
   }
@@ -1531,15 +1530,21 @@ function normalizeMultimodalMediaInputs(value: unknown): MultimodalMediaInput[] 
 
 async function getMultimodalMcpServerForAnalysis() {
   const servers = await getAllMcpServers({ includeSecrets: false });
-  const server = servers.find((item) =>
-    item.displayName === MULTIMODAL_MCP_SERVER_NAME ||
-    item.transport.nativeHost === MULTIMODAL_MCP_NATIVE_HOST
-  );
+  const server = servers.find(isMultimodalMcpServer);
   if (!server) {
     throw new Error('Multimodal MCP preset is missing. Create it on the MCP page first.');
   }
   if (!server.enabled) {
     throw new Error('Multimodal MCP server is disabled. Enable it on the MCP page first.');
+  }
+  if (!server.execution.enabled || server.execution.mode === 'disabled') {
+    throw new Error('Multimodal MCP execution is disabled. Enable execution on the MCP page first.');
+  }
+  if (!isMultimodalAnalysisToolAllowed(server.allowlist)) {
+    throw new Error('Multimodal MCP analysis tools are disabled. Enable analyze_images or analyze_video on the MCP page first.');
+  }
+  if (!canUseMultimodalMediaInput(server)) {
+    throw new Error('Multimodal MCP is not available for media analysis.');
   }
   return server;
 }
