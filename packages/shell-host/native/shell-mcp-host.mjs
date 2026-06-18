@@ -885,12 +885,14 @@ const shellSessions = new Map();
 function createPersistentShellArgs(shell) {
   // Keep the shell reading commands from stdin so subsequent commands reuse the
   // same process. `-NonInteractive` on Windows keeps PowerShell from printing
-  // prompts; `-Command -` makes it read a script from stdin. POSIX shells read
-  // stdin by default.
+  // prompts; `-Command -` makes it read a script from stdin. POSIX shells with
+  // no script argument and `-s` read commands from stdin — crucially the arg
+  // array must be empty so argv[0] (the binary path, supplied by spawn) is the
+  // only positional and the shell doesn't try to execute a stray arg as a script.
   if (platform() === 'win32') {
-    return [shell || DEFAULT_SHELL, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'];
+    return ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '-'];
   }
-  return [shell || DEFAULT_SHELL];
+  return ['-s'];
 }
 
 function buildSessionEndMarkerLine(token) {
@@ -949,6 +951,7 @@ async function beginShellSession(args) {
     if (shellSessions.has(sessionId)) closeShellSession(sessionId, 'process_exited');
   });
 
+  shellSessions.set(sessionId, session);
   armSessionIdleTimer(session);
 
   return {
