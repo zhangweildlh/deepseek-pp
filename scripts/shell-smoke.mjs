@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -130,6 +130,9 @@ await testMethod('tools/list', 'tools/list', undefined, (res) => {
     'python_exec',
     'local_skill_preview',
     'local_folder_pick',
+    'shell_session_begin',
+    'shell_session_exec',
+    'shell_session_end',
   ];
   assert(res.result.tools.length >= requiredTools.length, `expected at least ${requiredTools.length} tools, got ${res.result.tools.length}`);
   for (const tool of requiredTools) {
@@ -265,6 +268,114 @@ await testMethod('tools/call shell_exec (missing command param)', 'tools/call', 
 await testMethod('unknown method', 'unknown/method', {}, (res) => {
   assert(res.error, 'expected error');
   assert(res.error.code === -32601, 'expected method not found code');
+});
+
+// --- Persistent shell session ---
+//
+// Reproduces the issue #230 scenario shape: a resident tool's state must
+// survive across separate shell_session_exec calls within one session, and
+// cross-session isolation must hold.
+
+const IS_WIN = platform() === 'win32';
+const PRINT_CWD = IS_WIN ? 'Get-Location' : 'pwd';
+const CD_PARENT = IS_WIN ? 'Set-Location ..' : 'cd ..';
+const EXPORT_VAR = IS_WIN ? '$env:DPP_SMOKE = "persisted"' : 'export DPP_SMOKE=persisted';
+const PRINT_VAR_CMD = IS_WIN ? 'Write-Output $env:DPP_SMOKE' : 'echo $DPP_SMOKE';
+
+// The session_id from begin must be threaded into subsequent exec/end calls, so
+// use an explicit imperative block that talks to one long-lived host instead
+// of the per-call testMethod helper (which closes stdin after each request).
+{
+  const child = spawnHost();
+  let sessionId = null;
+  const label = 'shell_session begin/exec/end (cwd + env persist)';
+  try {
+    // begin: start the session in tmpdir so we can verify cwd drifts from there.
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_begin',
+      arguments: { cwd: tmpdir() },
+    }));
+    let res = await readNativeMessage(child);
+    sessionId = res.result?.structuredContent?.data?.session_id;
+    assert(sessionId, 'expected session_id from begin');
+    assert(res.result?.structuredContent?.data?.cwd === tmpdir(), 'expected begin cwd to match requested');
+
+    // exec: basic stdout
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: 'echo first_in_session' },
+    }));
+    res = await readNativeMessage(child);
+    assert(res.result?.structuredContent?.data?.exitCode === 0, `expected exit 0, got ${res.result?.structuredContent?.data?.exitCode}`);
+    assert(res.result?.structuredContent?.data?.stdout.trim() === 'first_in_session', `expected first_in_session, got "${res.result?.structuredContent?.data?.stdout}"`);
+
+    // exec: cwd persists across calls (cd .. then pwd must reflect the change)
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: CD_PARENT },
+    }));
+    await readNativeMessage(child);
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: PRINT_CWD },
+    }));
+    res = await readNativeMessage(child);
+    const cwdAfter = res.result?.structuredContent?.data?.stdout.trim();
+    assert(cwdAfter !== tmpdir() && cwdAfter.length > 0, `expected cwd to have drifted from ${tmpdir()} (got "${cwdAfter}")`);
+
+    // exec: env export persists
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: EXPORT_VAR },
+    }));
+    await readNativeMessage(child);
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: PRINT_VAR_CMD },
+    }));
+    res = await readNativeMessage(child);
+    assert(res.result?.structuredContent?.data?.stdout.trim() === 'persisted', `expected persisted env var, got "${res.result?.structuredContent?.data?.stdout}"`);
+
+    // end
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_end',
+      arguments: { session_id: sessionId },
+    }));
+    res = await readNativeMessage(child);
+    assert(res.result?.structuredContent?.data?.closed === true, 'expected session closed');
+
+    // exec after end: must report not found
+    sendNativeMessage(child, makeEnvelope('tools/call', {
+      name: 'shell_session_exec',
+      arguments: { session_id: sessionId, command: 'echo nope' },
+    }));
+    res = await readNativeMessage(child);
+    assert(res.result?.isError === true, 'expected isError for exec after end');
+    assert(/Session not found|shell has exited/.test(res.result?.content?.[0]?.text || ''), `expected not-found message, got "${res.result?.content?.[0]?.text}"`);
+
+    passed++;
+    console.log(`  PASS: ${label}`);
+  } catch (err) {
+    failed++;
+    console.log(`  FAIL: ${label} — ${err.message}`);
+  } finally {
+    child.kill();
+  }
+}
+
+await testMethod('shell_session_exec with unknown session', 'tools/call', {
+  name: 'shell_session_exec',
+  arguments: { session_id: 'definitely-not-a-real-session-id', command: 'echo x' },
+}, (res) => {
+  assert(res.result?.isError === true, 'expected isError for unknown session');
+  assert(/Session not found/.test(res.result?.content?.[0]?.text || ''), 'expected not-found message');
+});
+
+await testMethod('shell_session_end missing session_id', 'tools/call', {
+  name: 'shell_session_end',
+  arguments: {},
+}, (res) => {
+  assert(res.result?.isError === true, 'expected isError for missing session_id');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

@@ -189,6 +189,7 @@ function renderShellMcpHint(
       ? translate(locale, 'prompt.shellHintStatus', { statusName })
       : '',
     translate(locale, 'prompt.shellHintWindows'),
+    translate(locale, 'prompt.shellHintSession'),
     translate(locale, 'prompt.shellHintNames', { names: SHELL_TOOL_NAMES.join(', ') }),
   ].filter(Boolean).join('\n');
 }

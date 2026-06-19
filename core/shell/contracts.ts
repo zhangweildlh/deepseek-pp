@@ -5,7 +5,7 @@ export const SHELL_MCP_NATIVE_HOST = 'com.deepseek_pp.shell';
 
 export const OFFICECLI_BIN_PATH = 'officecli';
 
-export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick'] as const;
+export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick', 'shell_session_begin', 'shell_session_exec', 'shell_session_end'] as const;
 export type ShellToolName = typeof SHELL_TOOL_NAMES[number];
 
 export interface ShellToolSpec {
@@ -51,5 +51,23 @@ export const SHELL_TOOL_SPECS: readonly ShellToolSpec[] = [
     title: '选择本地文件夹',
     description: '打开系统文件夹选择器并返回用户选择的本地绝对路径。',
     risk: 'low',
+  },
+  {
+    name: 'shell_session_begin',
+    title: '开启持久 Shell 会话',
+    description: '启动一个长生存的 Shell 会话，其工作目录、环境变量与常驻子进程（例如 OfficeCLI 驻留模式）可在后续多次 shell_session_exec 之间保持。适用于多步骤工作流，避免分次 shell_exec 丢失状态。返回 session_id 供后续调用使用。',
+    risk: 'high',
+  },
+  {
+    name: 'shell_session_exec',
+    title: '在持久会话中执行命令',
+    description: '在先前开启的持久 Shell 会话中执行命令。状态（工作目录、export 的变量、常驻进程）在调用之间保持。返回与 shell_exec 一致的 stdout、stderr 和退出码。会话闲置一段时间后会自动关闭。',
+    risk: 'high',
+  },
+  {
+    name: 'shell_session_end',
+    title: '关闭持久 Shell 会话',
+    description: '关闭由 shell_session_begin 开启的持久 Shell 会话并释放其子进程。调用后该 session_id 不再有效。',
+    risk: 'medium',
   },
 ] as const;

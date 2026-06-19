@@ -1314,6 +1314,7 @@ You MUST strictly follow the above defined tool name and parameter schemas to in
     shellHintExec: '使用 <{execName}>，JSON body 例如 {"command":"officecli --version","timeout_ms":60000}，以运行 OfficeCLI 或其他本地 CLI 工具。',
     shellHintStatus: '需要了解宿主状态、shell、PATH 或工作目录上下文时，先调用 <{statusName}>{}</{statusName}>。',
     shellHintWindows: '命令语法必须匹配 shell_status.shell。Windows 下 Shell Local 默认使用 PowerShell，因此列文件可使用 Get-ChildItem -LiteralPath "D:\\\\Documents\\\\Downloads\\\\CN" -File | Select-Object -ExpandProperty FullName，并在 command 字符串内正确引用路径。仅在确实需要 CMD 语法（如 dir /b）时显式使用 cmd.exe /c。',
+    shellHintSession: '多步骤工作流（例如 OfficeCLI 的 create + open + add，或需要保留 cd/export 状态）应使用持久会话：先 <shell_session_begin>{"cwd":"/path"}</shell_session_begin>，再用 <shell_session_exec>{"session_id":"...","command":"..."}</shell_session_exec> 逐条执行，完成后 <shell_session_end>{"session_id":"..."}</shell_session_end>。session_id 在 begin 返回值中获取。每个 shell_session_exec 共享同一 shell，工作目录、环境变量与常驻进程会跨调用保留；会话闲置约 5 分钟后自动关闭。',
     shellHintNames: '可识别的 shell 工具名：{names}',
   },
   pet: {

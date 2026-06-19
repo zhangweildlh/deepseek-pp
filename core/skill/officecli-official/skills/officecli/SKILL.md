@@ -60,6 +60,20 @@ officecli close report.docx      # save and release
 
 Opt out of auto-start: `OFFICECLI_NO_AUTO_RESIDENT=1`.
 
+### ⚠️ Resident mode + one-shot shell execution
+
+A **one-shot** command runner (`shell_exec`, or any context that spawns a fresh shell per call) interacts badly with the resident process. `create` auto-starts a resident and returns "kept open in background"; if the shell then exits **without** an explicit `close`, that resident can outlive its shell session as a half-dead orphan holding the file lock. A follow-up `open` in a *new* shell then blocks trying to reach that orphan and **times out** (observed: first-run 120s timeout; clean retry succeeds). The reliable fixes:
+
+1. **Always pair `create`/`open` with a `close` in the same invocation.** Chain the whole write cycle with the shell's sequence operator, and skip the redundant `open` (the resident is already running after `create`):
+   ```bash
+   officecli create report.docx --force ; officecli add report.docx /body --type paragraph --prop text="Title" --prop style=Heading1 ; officecli close report.docx
+   ```
+   Or use `officecli batch` to apply many ops in a single save cycle (still end with `close`).
+
+2. **Use a persistent shell session.** When the host supports `shell_session_begin` / `shell_session_exec`, open a session once, run each officecli step as its own `shell_session_exec` against the same `session_id`, then `shell_session_end`. The resident stays cleanly attached to the long-lived shell, so there is no orphan between calls.
+
+Notes: `create` must carry `--force` when the file may already exist; appending to an already-closed file across calls with `add ; close` is fine (a fresh resident auto-starts).
+
 ---
 
 ## Quick Start

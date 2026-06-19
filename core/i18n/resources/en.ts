@@ -1314,6 +1314,7 @@ Do not put executable tool XML in a thinking/reasoning section; put it in the fi
     shellHintExec: 'Use <{execName}> with a JSON body such as {"command":"officecli --version","timeout_ms":60000} to run OfficeCLI or other local CLI tools.',
     shellHintStatus: 'Use <{statusName}>{}</{statusName}> first when you need host status, shell, PATH, or working-directory context.',
     shellHintWindows: 'Match command syntax to shell_status.shell. On Windows the Shell Local host uses PowerShell by default, so list files with commands such as Get-ChildItem -LiteralPath "D:\\\\Documents\\\\Downloads\\\\CN" -File | Select-Object -ExpandProperty FullName, and quote paths once inside the command string. Use cmd.exe /c explicitly only when you need CMD syntax such as dir /b.',
+    shellHintSession: 'For multi-step workflows (e.g. OfficeCLI create + open + add, or anything that needs to keep cd/export state) use a persistent session: open it with <shell_session_begin>{"cwd":"/path"}</shell_session_begin>, run each command with <shell_session_exec>{"session_id":"...","command":"..."}</shell_session_exec>, then close with <shell_session_end>{"session_id":"..."}</shell_session_end>. Take the session_id from the begin result. Every shell_session_exec reuses the same shell, so the working directory, exported variables, and resident processes persist across calls; the session auto-closes after roughly 5 minutes idle.',
     shellHintNames: 'Recognized shell tool names: {names}',
   },
   pet: {

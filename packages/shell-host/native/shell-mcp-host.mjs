@@ -915,12 +915,18 @@ async function beginShellSession(args) {
 
   let child;
   try {
+    // Run the session shell as its own process group leader so we can tear down
+    // the whole tree — shell + resident grandchildren (e.g. an OfficeCLI
+    // resident process) — with a single negative-PID kill. Without this, a
+    // SIGKILL to the shell alone leaves the resident as an orphan holding the
+    // document file lock, which is exactly the failure mode in issue #230.
     child = spawn(shellBin, shellArgs, {
       cwd,
       env,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: true,
     });
   } catch (err) {
     return {
@@ -976,6 +982,21 @@ function armSessionIdleTimer(session) {
   }, SESSION_IDLE_TIMEOUT_MS);
 }
 
+function killSessionProcessGroup(child) {
+  if (!child || child.exitCode !== null || typeof child.pid !== 'number') return;
+  // POSIX: the session shell is a process-group leader (detached:true), so a
+  // negative PID signal reaches the whole tree — including resident
+  // grandchildren (OfficeCLI resident, watch servers) that would otherwise
+  // outlive the shell and keep the document locked.
+  if (platform() !== 'win32') {
+    try { process.kill(-child.pid, 'SIGKILL'); return; } catch {}
+  }
+  // Windows has no process groups; fall back to killing the shell. Resident
+  // grandchildren there typically reattach when the next command opens the file,
+  // and Windows Job Objects would be needed for true tree kill (out of scope).
+  try { child.kill('SIGKILL'); } catch {}
+}
+
 function closeShellSession(sessionId, reason) {
   const session = shellSessions.get(sessionId);
   if (!session) return;
@@ -985,7 +1006,7 @@ function closeShellSession(sessionId, reason) {
     clearTimeout(session.idleTimer);
     session.idleTimer = null;
   }
-  try { session.child.kill('SIGKILL'); } catch {}
+  killSessionProcessGroup(session.child);
   process.stderr.write(`[shell-mcp-host] Session ${sessionId} closed (${reason}).\n`);
 }
 
@@ -1141,7 +1162,7 @@ function runInSession(session, command, { timeoutMs }) {
         shell: session.shell,
         session_id: session.id,
         exitCode: typeof exitCode === 'number' ? exitCode : 1,
-        stdout: Buffer.concat(stdoutChunks.length ? [stdoutChunks.join('')] : []).toString('utf8').replace(/\r?\n$/, ''),
+        stdout: stdoutChunks.join('').replace(/\r?\n$/, ''),
         stderr: stderrText,
         truncated: stdoutBytes > SESSION_MAX_OUTPUT_BYTES || stderrBytes > SESSION_MAX_OUTPUT_BYTES,
         timedOut: false,
