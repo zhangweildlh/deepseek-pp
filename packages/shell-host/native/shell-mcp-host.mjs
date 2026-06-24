@@ -920,14 +920,23 @@ async function beginShellSession(args) {
     // resident process) — with a single negative-PID kill. Without this, a
     // SIGKILL to the shell alone leaves the resident as an orphan holding the
     // document file lock, which is exactly the failure mode in issue #230.
-    child = spawn(shellBin, shellArgs, {
+    //
+    // detached:true is POSIX-only here. On Windows, CREATE_NEW_PROCESS_GROUP +
+    // `powershell -Command -` makes PowerShell see stdin as a non-console
+    // stream, treat the empty read as a completed script, and exit immediately
+    // (exit 0) — so the session dies before any shell_session_exec runs. The
+    // Windows tear-down path in killSessionProcessGroup already falls back to a
+    // direct kill (no process groups on Win32), so dropping detached there loses
+    // nothing.
+    const spawnOptions = {
       cwd,
       env,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      detached: true,
-    });
+    };
+    if (platform() !== 'win32') spawnOptions.detached = true;
+    child = spawn(shellBin, shellArgs, spawnOptions);
   } catch (err) {
     return {
       isError: true,
@@ -1611,9 +1620,38 @@ function getPythonLimits() {
   };
 }
 
+// H-01: shell_exec / shell sessions must NOT inherit the host's entire
+// process.env, which leaks secrets (AWS_*, GITHUB_TOKEN, *_SECRET, DATABASE_URL,
+// …) into any command the model runs. Mirror createPythonChildEnv(): start from a
+// minimal base allowlist and add only the caller's explicit extraEnv.
+const SHELL_ENV_BASE_KEYS = platform() === 'win32'
+  ? ['SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE',
+     'LOCALAPPDATA', 'APPDATA', 'HOMEDRIVE', 'HOMEPATH', 'PROGRAMDATA',
+     'PROGRAMFILES', 'PROGRAMFILES(X86)', 'PUBLIC', 'USERNAME', 'USERDOMAIN',
+     'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']
+  : ['HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TEMP', 'TMP',
+     'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'TZ'];
+
+// H-03 (env portion): never honour dynamic-loader hijack variables, even if the
+// caller passes them via extraEnv.
+const BLOCKED_CHILD_ENV_KEYS = new Set([
+  'LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT',
+  'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH',
+]);
+
 function createChildEnv(extraEnv) {
   const explicitPath = getExplicitPathOverride(extraEnv);
-  const env = extraEnv && typeof extraEnv === 'object' ? { ...process.env, ...extraEnv } : { ...process.env };
+  const env = {};
+  for (const key of SHELL_ENV_BASE_KEYS) {
+    if (typeof process.env[key] === 'string') env[key] = process.env[key];
+  }
+  if (extraEnv && typeof extraEnv === 'object') {
+    for (const [key, value] of Object.entries(extraEnv)) {
+      if (typeof value !== 'string') continue;
+      if (BLOCKED_CHILD_ENV_KEYS.has(key.toUpperCase())) continue;
+      env[key] = value;
+    }
+  }
   const pathValue = explicitPath !== null ? explicitPath : (getEnvironmentPath(env) || getEnvironmentPath(process.env));
   setEnvironmentPath(env, pathValue);
   if (platform() === 'win32') {
