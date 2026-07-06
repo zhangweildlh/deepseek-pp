@@ -2870,7 +2870,7 @@ function startInlineAgentIfNeeded(
 
   // Concurrency guard (issue #298): if an inline agent loop is already running
   // for this conversation, do NOT start a second one off a user-initiated turn
-  // (e.g. the user typed "继续" because the long-running agent looked stuck).
+  // (e.g. a "continue" prompt because the long-running agent looked stuck).
   // Starting a second loop previously left two agent panels racing in the DOM.
   // Continuation turns are produced by the agent loop itself and are already
   // handled by isInlineAgentResponseComplete above.
