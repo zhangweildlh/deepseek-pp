@@ -190,6 +190,7 @@ import {
   updateAutomation,
 } from '../core/automation/store';
 import { runDeepSeekAutomation } from '../core/automation/runner';
+import { createAutomationRunnerFailure } from '../core/automation/messages';
 import {
   AUTOMATION_WAKE_ALARM_NAME,
   AUTOMATION_WAKE_INTERVAL_MINUTES,
@@ -241,6 +242,8 @@ import type { ConversationExportProgress, ConversationExportResult } from '../co
 const DEEPSEEK_HOME_URL = 'https://chat.deepseek.com/';
 const DEEPSEEK_TAB_URL_PATTERN = '*://chat.deepseek.com/*';
 const REFRESH_AUTH_MESSAGE = { type: 'REFRESH_DEEPSEEK_AUTH' } as const;
+const AUTOMATION_AUTH_TOKEN_MISSING_MESSAGE =
+  'DeepSeek login token is missing. Refresh chat.deepseek.com or sign in again, then retry the automation.';
 let chatSessionId: string | null = null;
 let chatParentMessageId: number | null = null;
 let officialApiChatMessages: OfficialDeepSeekMessage[] = [];
@@ -2004,6 +2007,17 @@ async function executeAutomationWithContext(
     ])
     : [null, null];
 
+  const clientHeaders = await loadOrRefreshClientHeaders();
+  if (!clientHeaders) {
+    return createAutomationRunnerFailure(
+      { ...request },
+      'deepseek_auth_token_missing',
+      AUTOMATION_AUTH_TOKEN_MISSING_MESSAGE,
+      'auth',
+      true,
+    );
+  }
+
   return runDeepSeekAutomation({
     ...request,
     locale: currentBackgroundLocale,
@@ -2015,6 +2029,7 @@ async function executeAutomationWithContext(
     },
   }, {
     executeToolCall: (call) => executeBackgroundRuntimeToolCall(call, 'automation'),
+    clientHeaders,
   });
 }
 
