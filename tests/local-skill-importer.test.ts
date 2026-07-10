@@ -8,12 +8,13 @@ vi.mock('../core/mcp/store', () => ({
 
 vi.mock('../core/mcp/discovery', () => ({
   executeMcpToolCall: vi.fn(),
+  getMcpToolDescriptors: vi.fn(),
   refreshMcpServerDiscovery: vi.fn(),
 }));
 
-import { executeMcpToolCall, refreshMcpServerDiscovery } from '../core/mcp/discovery';
+import { executeMcpToolCall, getMcpToolDescriptors, refreshMcpServerDiscovery } from '../core/mcp/discovery';
 import { getAllMcpServers, updateMcpServer } from '../core/mcp/store';
-import type { McpServerConfig } from '../core/mcp/types';
+import type { McpServerConfig, McpToolCacheEntry } from '../core/mcp/types';
 import { importLocalSkillSource, pickLocalSkillFolder, previewLocalSkillSource } from '../core/skill/local-importer';
 
 const SKILL_STORAGE_KEY = 'deepseek_pp_skills';
@@ -44,6 +45,7 @@ beforeEach(() => {
     allowlist: patch.allowlist ?? shellServer.allowlist,
   }));
   vi.mocked(refreshMcpServerDiscovery).mockResolvedValue({} as never);
+  vi.mocked(getMcpToolDescriptors).mockResolvedValue([]);
   vi.mocked(executeMcpToolCall).mockResolvedValue(createLocalSkillToolResult());
 });
 
@@ -182,6 +184,9 @@ describe('local Skill importer', () => {
 
   it('describes non-bundled local resources as available on demand', async () => {
     vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    const discovery = createShellDiscovery(['local_file_read'], true, null, 'auto');
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(discovery);
+    vi.mocked(getMcpToolDescriptors).mockResolvedValueOnce(discovery.descriptors);
 
     const result = await importLocalSkillSource({
       rootPath: '/Users/me/.codex/skills/demo',
@@ -194,6 +199,55 @@ describe('local Skill importer', () => {
     expect(imported.instructions).toContain('Read them with Shell MCP when the upstream instructions need them.');
     expect(imported.instructions).toContain('- references/extended-guide.md (2048 bytes)');
     expect(imported.instructions).not.toContain('## Omitted Supporting Files');
+  });
+
+  it('requires a current Shell Host before promising on-demand resource reads', async () => {
+    vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(createShellDiscovery(['local_skill_preview', 'shell_exec']));
+
+    await expect(previewLocalSkillSource('/Users/me/.codex/skills/demo')).rejects.toThrow(
+      'does not expose local_file_read',
+    );
+  });
+
+  it('rejects on-demand imports when local_file_read is disabled by policy', async () => {
+    vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(createShellDiscovery(['local_file_read'], false, null, 'auto'));
+
+    await expect(previewLocalSkillSource('/Users/me/.codex/skills/demo')).rejects.toThrow(
+      'not available to chat',
+    );
+  });
+
+  it('rejects manual readers that are not injected into the chat prompt', async () => {
+    vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(createShellDiscovery(['local_file_read']));
+
+    await expect(previewLocalSkillSource('/Users/me/.codex/skills/demo')).rejects.toThrow(
+      'execution mode to Auto',
+    );
+  });
+
+  it('accepts an enabled auto shell_exec fallback on older Shell Hosts', async () => {
+    vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    const discovery = createShellDiscovery(['local_skill_preview', 'shell_exec'], true, null, 'auto');
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(discovery);
+    vi.mocked(getMcpToolDescriptors).mockResolvedValueOnce(
+      discovery.descriptors.filter((descriptor) => descriptor.name === 'shell_exec'),
+    );
+
+    await expect(previewLocalSkillSource('/Users/me/.codex/skills/demo')).resolves.toMatchObject({
+      skills: [expect.objectContaining({ omittedFiles: [expect.any(Object)] })],
+    });
+  });
+
+  it('surfaces Shell discovery failures while checking on-demand resource support', async () => {
+    vi.mocked(executeMcpToolCall).mockResolvedValueOnce(createLocalSkillWithOnDemandResourceToolResult());
+    vi.mocked(refreshMcpServerDiscovery).mockResolvedValueOnce(createShellDiscovery([], true, 'native host disconnected'));
+
+    await expect(previewLocalSkillSource('/Users/me/.codex/skills/demo')).rejects.toThrow(
+      'native host disconnected',
+    );
   });
 
   it('imports a BOM-prefixed SKILL.md without losing the frontmatter name (issue #296)', async () => {
@@ -435,6 +489,47 @@ function createLocalSkillWithOnDemandResourceToolResult() {
           }],
         }],
       },
+    },
+  };
+}
+
+function createShellDiscovery(
+  toolNames: string[],
+  enabled = true,
+  error: string | null = null,
+  mode: 'auto' | 'manual' = 'manual',
+): McpToolCacheEntry {
+  const now = Date.now();
+  return {
+    serverId: 'shell-local',
+    descriptors: toolNames.map((name) => ({
+      id: `mcp:shell-local:${name}`,
+      provider: {
+        kind: 'mcp' as const,
+        id: 'shell-local',
+        displayName: SHELL_MCP_SERVER_NAME,
+        transport: 'native_messaging' as const,
+      },
+      name,
+      invocationName: name,
+      title: name,
+      description: name,
+      inputSchema: { type: 'object', properties: {} },
+      execution: {
+        enabled,
+        mode,
+        risk: 'low' as const,
+      },
+    })),
+    refreshedAt: now,
+    expiresAt: now + 60_000,
+    health: {
+      serverId: 'shell-local',
+      status: error ? 'error' : 'ready',
+      checkedAt: now,
+      latencyMs: 1,
+      toolCount: toolNames.length,
+      error,
     },
   };
 }

@@ -1,4 +1,4 @@
-import { executeMcpToolCall, refreshMcpServerDiscovery } from '../mcp/discovery';
+import { executeMcpToolCall, getMcpToolDescriptors, refreshMcpServerDiscovery } from '../mcp/discovery';
 import { getAllMcpServers, updateMcpServer } from '../mcp/store';
 import { buildShellAllowlistUpgrade, isShellMcpServer } from '../shell';
 import type {
@@ -19,6 +19,11 @@ import {
 } from './registry';
 
 const MAX_SKILL_BYTES = 120_000;
+const ON_DEMAND_RESOURCE_READER_NAMES = new Set(['local_file_read', 'shell_exec']);
+const STALE_LOCAL_FILE_READ_MESSAGE = [
+  'Current Shell Native Host can preview local Skills but does not expose local_file_read, and shell_exec is not available to chat.',
+  'Reinstall Shell Native Host from MCP > Shell Local to add the least-privilege reader, restart the browser, then try again.',
+].join(' ');
 
 interface LocalSkillHostBundle {
   rootPath: string;
@@ -291,7 +296,33 @@ async function readLocalSkillBundle(rootPath: string, selectedPaths?: Set<string
   if (!result.ok) {
     throw new Error(formatToolFailure(result));
   }
-  return parseLocalSkillHostBundle(result.output);
+  const bundle = parseLocalSkillHostBundle(result.output);
+  await ensureOnDemandResourcesReadable(server, bundle);
+  return bundle;
+}
+
+async function ensureOnDemandResourcesReadable(
+  server: McpServerConfig,
+  bundle: LocalSkillHostBundle,
+): Promise<void> {
+  const hasOnDemandResources = bundle.skills.some((skill) => skill.omittedFiles.length > 0);
+  if (!hasOnDemandResources) return;
+
+  const discovery = await refreshMcpServerDiscovery(server.id);
+  if (discovery.health.status === 'error') {
+    throw new Error(`Unable to verify Shell MCP local_file_read availability: ${discovery.health.error || 'MCP discovery failed.'}`);
+  }
+  const runtimeDescriptors = await getMcpToolDescriptors();
+  const reader = runtimeDescriptors.find((descriptor) =>
+    descriptor.provider.kind === 'mcp' &&
+    descriptor.provider.id === server.id &&
+    ON_DEMAND_RESOURCE_READER_NAMES.has(descriptor.name)
+  );
+  if (reader) return;
+
+  const hasLocalFileReader = discovery.descriptors.some((descriptor) => descriptor.name === 'local_file_read');
+  if (!hasLocalFileReader) throw new Error(STALE_LOCAL_FILE_READ_MESSAGE);
+  throw new Error('Shell MCP on-demand file reading is not available to chat. Set Shell Local execution mode to Auto and allow local_file_read before importing this Skill.');
 }
 
 async function executeShellMcpTool(
