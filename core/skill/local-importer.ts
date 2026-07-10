@@ -3,7 +3,9 @@ import { getAllMcpServers, updateMcpServer } from '../mcp/store';
 import { buildShellAllowlistUpgrade, isShellMcpServer } from '../shell';
 import type {
   LocalSkillImportRequest,
-  LocalSkillImportResult,
+  LocalSkillImportBlock,
+  LocalSkillImportBlockCode,
+  LocalSkillImportResponse,
   LocalSkillPreview,
   LocalSkillPreviewItem,
   LocalSkillSource,
@@ -32,6 +34,27 @@ interface LocalSkillHostBundle {
   skills: LocalSkillHostItem[];
   warnings: string[];
   truncated: boolean;
+}
+
+interface LocalSkillBundleReadResult {
+  bundle: LocalSkillHostBundle;
+  onDemandResourceBlock?: LocalSkillImportBlock;
+}
+
+interface OnDemandResourceIssue {
+  code: LocalSkillImportBlockCode;
+  detail?: string;
+  message: string;
+}
+
+class LocalSkillImportBlockedError extends Error {
+  constructor(
+    message: string,
+    readonly importBlock: LocalSkillImportBlock,
+  ) {
+    super(message);
+    this.name = 'LocalSkillImportBlockedError';
+  }
 }
 
 interface LocalSkillHostItem {
@@ -89,12 +112,29 @@ export async function pickLocalSkillFolder(defaultPath?: string): Promise<string
 
 export async function importLocalSkillSource(
   request: LocalSkillImportRequest,
-): Promise<LocalSkillImportResult> {
+): Promise<LocalSkillImportResponse> {
   if (request.selectedPaths.length === 0) {
     throw new Error('Select at least one local Skill before importing.');
   }
 
-  const loaded = await loadLocalSkillSource(request.rootPath, new Set(request.selectedPaths));
+  const selectedImportNames = new Map(Object.entries(request.selectedImportNames ?? {}));
+  let loaded: LoadedLocalSource;
+  try {
+    loaded = await loadLocalSkillSource(
+      request.rootPath,
+      new Set(request.selectedPaths),
+      selectedImportNames,
+    );
+  } catch (error) {
+    if (error instanceof LocalSkillImportBlockedError) {
+      return {
+        ok: false,
+        error: error.message,
+        importBlock: error.importBlock,
+      };
+    }
+    throw error;
+  }
   const selected = loaded.skills.filter((skill) => request.selectedPaths.includes(skill.item.path));
   const importedPaths = new Set(selected.map((skill) => skill.item.path));
   const missingPaths = request.selectedPaths.filter((path) => !importedPaths.has(path));
@@ -137,8 +177,12 @@ export async function importLocalSkillSource(
   };
 }
 
-async function loadLocalSkillSource(rootPath: string, selectedPaths?: Set<string>): Promise<LoadedLocalSource> {
-  const bundle = await readLocalSkillBundle(rootPath, selectedPaths);
+async function loadLocalSkillSource(
+  rootPath: string,
+  selectedPaths?: Set<string>,
+  selectedImportNames?: ReadonlyMap<string, string>,
+): Promise<LoadedLocalSource> {
+  const { bundle, onDemandResourceBlock } = await readLocalSkillBundle(rootPath, selectedPaths);
   if (bundle.skills.length === 0) {
     throw new Error('No SKILL.md was found under this local directory.');
   }
@@ -159,7 +203,13 @@ async function loadLocalSkillSource(rootPath: string, selectedPaths?: Set<string
   };
 
   const existingContext = await createExistingSkillContext(source.id);
-  const loadedSkills = bundle.skills.map((skill) => loadLocalSkill(source, skill, existingContext));
+  const loadedSkills = bundle.skills.map((skill) => loadLocalSkill(
+    source,
+    skill,
+    existingContext,
+    skill.omittedFiles.length > 0 ? onDemandResourceBlock : undefined,
+    selectedImportNames?.get(skill.path),
+  ));
   const previewSkills = loadedSkills.map((skill) => skill.item);
 
   return {
@@ -181,6 +231,8 @@ function loadLocalSkill(
   source: LocalSkillSource,
   hostSkill: LocalSkillHostItem,
   existingContext: ExistingSkillContext,
+  importBlock?: LocalSkillImportBlock,
+  selectedImportName?: string,
 ): LoadedLocalSkill {
   const warnings = [...hostSkill.warnings];
   if (hostSkill.content.length > MAX_SKILL_BYTES) {
@@ -189,7 +241,7 @@ function loadLocalSkill(
 
   const parsed = parseSkillDoc(hostSkill.content, hostSkill.path);
   const existingRemoteSkill = existingContext.bySourcePath.get(`${source.id}:${hostSkill.path}`);
-  const baseImportName = existingRemoteSkill?.name ?? parsed.name;
+  const baseImportName = existingRemoteSkill?.name ?? selectedImportName ?? parsed.name;
   const importName = existingRemoteSkill?.name ?? createUniqueSkillName(baseImportName, existingContext.occupiedNames);
   existingContext.occupiedNames.add(importName);
 
@@ -256,6 +308,7 @@ function loadLocalSkill(
     omittedFiles: remote.omittedFiles,
     scriptFiles: remote.scriptFiles ?? [],
     warnings,
+    importBlock,
     nameChanged: importName !== parsed.name,
     existingSkillName: existingRemoteSkill?.name ?? conflictingSkill?.name,
     existingSourceId: existingRemoteSkill?.remote?.sourceId ?? conflictingSkill?.remote?.sourceId,
@@ -286,7 +339,7 @@ async function createExistingSkillContext(sourceId: string): Promise<ExistingSki
   };
 }
 
-async function readLocalSkillBundle(rootPath: string, selectedPaths?: Set<string>): Promise<LocalSkillHostBundle> {
+async function readLocalSkillBundle(rootPath: string, selectedPaths?: Set<string>): Promise<LocalSkillBundleReadResult> {
   const server = await getShellMcpServer();
   const result = await executeShellMcpTool(server, 'local_skill_preview', {
     rootPath,
@@ -297,20 +350,43 @@ async function readLocalSkillBundle(rootPath: string, selectedPaths?: Set<string
     throw new Error(formatToolFailure(result));
   }
   const bundle = parseLocalSkillHostBundle(result.output);
-  await ensureOnDemandResourcesReadable(server, bundle);
-  return bundle;
+  const onDemandResourceIssue = await getOnDemandResourceIssue(server, bundle);
+  if (selectedPaths && onDemandResourceIssue) {
+    throw new LocalSkillImportBlockedError(
+      onDemandResourceIssue.message,
+      toLocalSkillImportBlock(onDemandResourceIssue),
+    );
+  }
+  return {
+    bundle,
+    onDemandResourceBlock: onDemandResourceIssue
+      ? toLocalSkillImportBlock(onDemandResourceIssue)
+      : undefined,
+  };
 }
 
-async function ensureOnDemandResourcesReadable(
+function toLocalSkillImportBlock(issue: OnDemandResourceIssue): LocalSkillImportBlock {
+  return {
+    code: issue.code,
+    ...(issue.detail ? { detail: issue.detail } : {}),
+  };
+}
+
+async function getOnDemandResourceIssue(
   server: McpServerConfig,
   bundle: LocalSkillHostBundle,
-): Promise<void> {
+): Promise<OnDemandResourceIssue | null> {
   const hasOnDemandResources = bundle.skills.some((skill) => skill.omittedFiles.length > 0);
-  if (!hasOnDemandResources) return;
+  if (!hasOnDemandResources) return null;
 
   const discovery = await refreshMcpServerDiscovery(server.id);
   if (discovery.health.status === 'error') {
-    throw new Error(`Unable to verify Shell MCP local_file_read availability: ${discovery.health.error || 'MCP discovery failed.'}`);
+    const detail = discovery.health.error || 'MCP discovery failed.';
+    return {
+      code: 'shell_discovery_failed',
+      detail,
+      message: `Unable to verify Shell MCP local_file_read availability: ${detail}`,
+    };
   }
   const runtimeDescriptors = await getMcpToolDescriptors();
   const reader = runtimeDescriptors.find((descriptor) =>
@@ -318,11 +394,19 @@ async function ensureOnDemandResourcesReadable(
     descriptor.provider.id === server.id &&
     ON_DEMAND_RESOURCE_READER_NAMES.has(descriptor.name)
   );
-  if (reader) return;
+  if (reader) return null;
 
   const hasLocalFileReader = discovery.descriptors.some((descriptor) => descriptor.name === 'local_file_read');
-  if (!hasLocalFileReader) throw new Error(STALE_LOCAL_FILE_READ_MESSAGE);
-  throw new Error('Shell MCP on-demand file reading is not available to chat. Set Shell Local execution mode to Auto and allow local_file_read before importing this Skill.');
+  if (!hasLocalFileReader) {
+    return {
+      code: 'shell_host_update_required',
+      message: STALE_LOCAL_FILE_READ_MESSAGE,
+    };
+  }
+  return {
+    code: 'shell_reader_unavailable',
+    message: 'Shell MCP on-demand file reading is not available to chat. Set Shell Local execution mode to Auto and allow local_file_read before importing this Skill.',
+  };
 }
 
 async function executeShellMcpTool(
