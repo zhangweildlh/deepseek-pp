@@ -1,4 +1,7 @@
-import { readOptionalChromeApi } from './chrome-api';
+import {
+  hasDeclaredManifestPermission,
+  readOptionalChromeApi,
+} from './chrome-api';
 
 export type PlatformKind = 'browser_extension' | 'unknown';
 
@@ -84,7 +87,8 @@ export function getCurrentPlatformEnvironment(): PlatformEnvironment {
     capabilities: createCapabilityMap({
       storage: Boolean(readOptionalChromeApi(() => chromeApi?.storage?.local)),
       runtimeMessaging: Boolean(readOptionalChromeApi(() => runtime?.sendMessage)),
-      downloads: Boolean(readOptionalChromeApi(() => chromeApi?.downloads?.download)),
+      downloads: hasDeclaredManifestPermission(runtime, 'downloads')
+        && Boolean(readOptionalChromeApi(() => chromeApi?.downloads?.download)),
       filePicker: typeof document !== 'undefined',
       folderPicker: typeof document !== 'undefined',
       assetUrl: Boolean(readOptionalChromeApi(() => runtime?.getURL)),

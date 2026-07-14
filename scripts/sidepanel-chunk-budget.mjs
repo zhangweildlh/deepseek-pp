@@ -27,11 +27,19 @@ const BASELINE = Object.freeze({
   },
 });
 
+// W2.6 pre-change Chrome measurement at 450b5e2. The rich Markdown renderer
+// was part of ChatPage's static graph, leaving less than 1% budget headroom.
+const WAVE_2_CHAT_BASELINE = Object.freeze({
+  firstChatScreen: { raw: 498_013, gzip: 150_087 },
+  ChatPage: { raw: 134_902, gzip: 40_039 },
+});
+
 const BUDGET = Object.freeze({
   initialShell: BASELINE.initialShell,
-  firstChatScreen: { raw: 500_000, gzip: 151_000 },
+  firstChatScreen: { raw: 400_000, gzip: 122_000 },
+  richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
-    ChatPage: { raw: 140_000, gzip: 42_000 },
+    ChatPage: { raw: 25_000, gzip: 8_000 },
     LibraryPage: { raw: 2_500, gzip: 1_200 },
     MemoryPage: { raw: 6_000, gzip: 2_500 },
     SavedPage: { raw: 10_000, gzip: 4_000 },
@@ -74,6 +82,18 @@ function verifyBrowserBuild(browser) {
   const firstScreenMetric = measureFiles(buildDir, firstScreenGraph);
   assertBudget(browser, 'first chat screen', firstScreenMetric, BUDGET.firstChatScreen);
 
+  const richRendererChunk = findNamedChunk(buildDir, 'RichMessageContent');
+  const richRendererGraph = collectStaticModuleGraph(buildDir, [richRendererChunk]);
+  const firstScreenFiles = new Set(firstScreenGraph);
+  const richRendererIncrement = richRendererGraph.filter((file) => !firstScreenFiles.has(file));
+  const richRendererMetric = measureFiles(buildDir, richRendererIncrement);
+  assertBudget(
+    browser,
+    'rich message renderer static increment',
+    richRendererMetric,
+    BUDGET.richRendererIncrement,
+  );
+
   const routeMetrics = {};
   for (const [chunkName, budget] of Object.entries(BUDGET.routeChunks)) {
     const chunkPath = findNamedChunk(buildDir, chunkName);
@@ -85,9 +105,11 @@ function verifyBrowserBuild(browser) {
   console.log(JSON.stringify({
     browser,
     baseline: BASELINE,
+    wave2ChatBaseline: WAVE_2_CHAT_BASELINE,
     current: {
       initialShell: initialMetric,
       firstChatScreen: firstScreenMetric,
+      richRendererIncrement: richRendererMetric,
       routeChunks: routeMetrics,
     },
   }, null, 2));

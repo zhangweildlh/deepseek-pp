@@ -72,23 +72,39 @@ export const MCP_NATIVE_ENVELOPE_FIXTURE = {
   },
 } as const;
 
-export const MCP_CURRENT_GAPS = [
+export const MCP_STRICT_RESPONSE_REJECTIONS = [
   {
-    name: 'response normalization accepts a wrong id and result plus error while rewriting jsonrpc',
-    currentBehavior: 'shallow-normalization',
-    target: 'strict-json-rpc-response-codec-after-T3.5',
+    name: 'wrong JSON-RPC version',
+    response: { jsonrpc: '1.0', id: 'expected-id', result: { value: true } },
   },
   {
-    name: 'tool output budget counts JavaScript characters rather than UTF-8 bytes',
-    currentBehavior: 'utf16-slice-can-split-surrogate-pairs',
-    target: 'byte-accurate-output-budget-after-T5.1',
+    name: 'wrong request id',
+    response: { jsonrpc: '2.0', id: 'wrong-id', result: { value: true } },
   },
   {
-    name: 'tool pagination can append a full page beyond maxToolCount',
-    currentBehavior: 'page-level-limit-check',
-    target: 'explicit-shell-catalog-limit-after-T4.5',
+    name: 'result and error together',
+    response: {
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      result: { value: true },
+      error: { code: -32000, message: 'also present' },
+    },
+  },
+  {
+    name: 'neither result nor error',
+    response: { jsonrpc: '2.0', id: 'expected-id' },
+  },
+  {
+    name: 'malformed error object',
+    response: { jsonrpc: '2.0', id: 'expected-id', error: { code: '-32000', message: null } },
+  },
+  {
+    name: 'fractional error code',
+    response: { jsonrpc: '2.0', id: 'expected-id', error: { code: -32000.5, message: 'invalid code' } },
   },
 ] as const;
+
+export const MCP_CURRENT_GAPS = [] as const;
 
 export const MCP_UNKNOWN_TRANSPORT_CONTRACT = {
   errorCode: 'mcp_transport_unsupported',

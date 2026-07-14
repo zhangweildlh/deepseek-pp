@@ -27,6 +27,7 @@ describe('platform capability contracts', () => {
         id: 'extension-id',
         sendMessage: vi.fn(),
         getURL: vi.fn(),
+        getManifest: vi.fn(() => ({ permissions: [] })),
         connectNative: vi.fn(),
       },
       storage: { local: {} },
@@ -42,10 +43,23 @@ describe('platform capability contracts', () => {
     const environment = getCurrentPlatformEnvironment();
 
     expect(environment.kind).toBe('browser_extension');
+    expect(isCapabilitySupported(environment, 'downloads')).toBe(false);
     expect(isCapabilitySupported(environment, 'nativeMessaging')).toBe(true);
     expect(isCapabilitySupported(environment, 'sidePanel')).toBe(true);
     expect(isCapabilitySupported(environment, 'browserControl')).toBe(true);
     expect(isCapabilitySupported(environment, 'accessibilityTree')).toBe(true);
+  });
+
+  it('requires both the downloads API and its manifest permission', () => {
+    vi.stubGlobal('chrome', {
+      runtime: {
+        id: 'extension-id',
+        getManifest: vi.fn(() => ({ permissions: ['downloads'] })),
+      },
+      downloads: { download: vi.fn() },
+    });
+
+    expect(getCurrentPlatformEnvironment().capabilities.downloads).toBe(true);
   });
 
   it('does not require tabGroups for browser control support', () => {
@@ -122,5 +136,12 @@ describe('platform capability contracts', () => {
 
     expect(isShellNativeHostSupported(environment)).toBe(false);
     expect(getSupportedMcpTransportKinds(kinds, environment)).toEqual(['streamable_http', 'stdio_bridge']);
+  });
+
+  it('fails closed while the platform environment is not loaded', () => {
+    const kinds: McpServerTransportConfig['kind'][] = ['streamable_http', 'native_messaging'];
+
+    expect(isShellNativeHostSupported(null)).toBe(false);
+    expect(getSupportedMcpTransportKinds(kinds, undefined)).toEqual(['streamable_http']);
   });
 });

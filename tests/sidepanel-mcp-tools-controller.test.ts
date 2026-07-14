@@ -4,6 +4,8 @@ import {
   McpPermissionError,
   createMcpToolsController,
   createPythonToolTogglePatch,
+  getAllowedMcpTransportKinds,
+  isMcpNativeMessagingSupported,
   isMcpToolEnabled,
   nextMcpToolAllowlist,
   normalizeHostPermissionOrigin,
@@ -66,6 +68,12 @@ describe('sidepanel MCP and Tools controller', () => {
       .toBe('https://example.test/*');
     expect(() => normalizeHostPermissionOrigin('file:///tmp/data'))
       .toThrow('only supports http/https');
+  });
+
+  it('keeps native controls disabled until the platform snapshot loads', () => {
+    expect(isMcpNativeMessagingSupported(null)).toBe(false);
+    expect(getAllowedMcpTransportKinds(['streamable_http', 'native_messaging'], null))
+      .toEqual(['streamable_http']);
   });
 });
 

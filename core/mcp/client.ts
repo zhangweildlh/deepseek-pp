@@ -126,6 +126,8 @@ export async function listMcpTools(
   options?: { signal?: AbortSignal },
 ): Promise<ToolDescriptor[]> {
   const tools: ToolDescriptor[] = [];
+  const maxToolCount = Math.max(0, Math.floor(server.limits.maxToolCount));
+  if (maxToolCount === 0) return tools;
   let cursor: string | undefined;
 
   do {
@@ -139,9 +141,12 @@ export async function listMcpTools(
     );
     const result = unwrapMcpResponse(response, 'mcp_tools_list_failed') as McpListToolsResult;
     const nextTools = Array.isArray(result.tools) ? result.tools : [];
-    tools.push(...nextTools.map((tool) => normalizeMcpToolDescriptor(server, tool)));
+    const remaining = maxToolCount - tools.length;
+    tools.push(...nextTools
+      .slice(0, remaining)
+      .map((tool) => normalizeMcpToolDescriptor(server, tool)));
     cursor = typeof result.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined;
-  } while (cursor && tools.length < server.limits.maxToolCount);
+  } while (cursor && tools.length < maxToolCount);
 
   return applyMcpToolPolicy(tools, server);
 }
@@ -317,14 +322,14 @@ function normalizeMcpToolResult(
   const output = normalizeToolOutput(result);
   const rendered = stringifyOutput(output);
   const limit = maxResultBytes ?? server.limits.maxResultBytes;
-  const truncated = rendered.length > limit;
-  const detail = truncated ? rendered.slice(0, limit) : rendered;
-  const errorMessage = result.isError ? extractMcpErrorMessage(result, detail) : undefined;
+  const detailSource = result.isError ? extractMcpErrorMessage(result, rendered) : rendered;
+  const detailProjection = truncateUtf8ToByteLimit(detailSource, limit);
+  const detail = detailProjection.value;
 
   return {
     ok: result.isError !== true,
     summary: getMcpToolResultSummary(call, result),
-    detail: result.isError ? (errorMessage || detail) : detail,
+    detail,
     name: call.name,
     provider: call.provider,
     descriptorId: call.descriptorId,
@@ -332,11 +337,11 @@ function normalizeMcpToolResult(
     startedAt,
     completedAt,
     durationMs: completedAt - startedAt,
-    truncated,
+    truncated: detailProjection.truncated,
     error: result.isError
       ? {
         code: 'mcp_tool_result_error',
-        message: errorMessage || detail || 'MCP tool returned isError=true.',
+        message: detail || 'MCP tool returned isError=true.',
         retryable: false,
         details: {
           externalOutcome: 'confirmed',
@@ -345,6 +350,23 @@ function normalizeMcpToolResult(
       }
       : undefined,
   };
+}
+
+function truncateUtf8ToByteLimit(value: string, maxBytes: number): { value: string; truncated: boolean } {
+  const limit = Number.isFinite(maxBytes) ? Math.max(0, Math.floor(maxBytes)) : 0;
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.byteLength <= limit) return { value, truncated: false };
+
+  let boundary = limit;
+  while (boundary > 0 && isUtf8ContinuationByte(bytes[boundary])) boundary -= 1;
+  return {
+    value: new TextDecoder().decode(bytes.subarray(0, boundary)),
+    truncated: true,
+  };
+}
+
+function isUtf8ContinuationByte(value: number | undefined): boolean {
+  return value !== undefined && (value & 0b1100_0000) === 0b1000_0000;
 }
 
 function extractMcpErrorMessage(result: McpCallToolResult, fallback: string): string {

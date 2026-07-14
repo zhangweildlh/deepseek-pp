@@ -593,6 +593,51 @@ describe('sidepanel interactions', () => {
     expect(buttonByText('识图').className).toContain('ds-chat-segment-active');
   });
 
+  it('scrolls to the updated message height after the lazy rich renderer commits', async () => {
+    const sendMessage = vi.fn(async (message: { type: string }) => {
+      if (message.type === 'GET_AUTH_STATUS') return { available: true, provider: 'deepseek-web' };
+      if (message.type === 'GET_OFFICIAL_API_CHAT_CONFIG') return {};
+      if (message.type === 'GET_MODEL_TYPE') return null;
+      if (message.type === 'GET_VOICE_SETTINGS') return {};
+      return null;
+    });
+    stubChrome(sendMessage);
+
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const messageList = container.querySelector('.ds-chat-messages') as HTMLDivElement;
+    const scrollAssignments: number[] = [];
+    let scrollTop = 0;
+    Object.defineProperties(messageList, {
+      scrollHeight: {
+        configurable: true,
+        get: () => messageList.querySelector('strong') ? 480 : 240,
+      },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+          scrollAssignments.push(value);
+        },
+      },
+    });
+
+    await act(async () => {
+      runtimeListeners.forEach((listener) => listener({
+        type: 'CHAT_STREAM_CHUNK',
+        text: 'Hello **world**',
+      }));
+    });
+
+    await vi.waitFor(() => {
+      expect(messageList.querySelector('strong')?.textContent).toBe('world');
+    });
+    expect(scrollAssignments).toContain(480);
+    expect(scrollTop).toBe(480);
+  });
+
   it('uploads a vision image attachment and submits its file reference', async () => {
     const sendMessage = vi.fn(async (message: { type: string; payload?: unknown }) => {
       if (message.type === 'GET_AUTH_STATUS') return { available: true, provider: 'deepseek-web' };

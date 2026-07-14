@@ -97,8 +97,11 @@ describe('DeepSeek external protocol contract', () => {
     const malformed = parseSSEChunk(DEEPSEEK_SSE_CURRENT_GAPS[0].wire);
     expect(malformed).toHaveLength(1);
     expect(parseSSEData(malformed[0].data)).toBeNull();
-    expect(DEEPSEEK_SSE_CURRENT_GAPS[0].target).toBe('observable-protocol-error-after-T5.1');
-
+    expect(DEEPSEEK_SSE_CURRENT_GAPS[0]).toMatchObject({
+      status: 'deferred',
+      owner: 'deferred:deepseek-stream-observability',
+      target: 'observable-protocol-error',
+    });
   });
 
   it('decodes CRLF frames without merging adjacent events', () => {

@@ -3,17 +3,23 @@ import type { GDriveSyncConfig, OneDriveSyncConfig, WebdavSyncConfig } from '../
 import { createStorageBackend } from '../core/sync/backend-factory';
 import {
   getAccessToken,
+  getOptionalRedirectUri,
+  getRedirectUri,
   invalidateToken,
   authedFetch,
+  runAuthCodeFlow,
 } from '../core/sync/oauth-client';
 import { createGDriveBackend } from '../core/sync/gdrive-client';
 import { createOneDriveBackend } from '../core/sync/onedrive-client';
 import type { LocaleMessageKey, MessageParams } from '../core/i18n';
 
-// chrome.identity is read lazily via getRedirectUri(); stub it so imports work.
 beforeEach(() => {
   vi.stubGlobal('chrome', {
-    identity: { getRedirectURL: () => 'https://test-ext.chromiumapp.org/' },
+    runtime: { getManifest: () => ({ permissions: ['identity'] }) },
+    identity: {
+      getRedirectURL: () => 'https://test-ext.chromiumapp.org/',
+      launchWebAuthFlow: vi.fn(),
+    },
   });
 });
 
@@ -51,6 +57,45 @@ describe('oauth token management', () => {
 
   afterEach(() => {
     invalidateToken('test-key');
+  });
+
+  it('fails closed when identity is not declared by the active manifest', async () => {
+    const launchWebAuthFlow = vi.fn(async () => 'https://test-ext.chromiumapp.org/#code=ignored');
+    vi.stubGlobal('chrome', {
+      runtime: { getManifest: () => ({ permissions: [] }) },
+      identity: {
+        getRedirectURL: () => 'https://test-ext.chromiumapp.org/',
+        launchWebAuthFlow,
+      },
+    });
+
+    expect(getOptionalRedirectUri()).toBeNull();
+    expect(() => getRedirectUri(testT))
+      .toThrow('translated:background.sync.identityUnavailable');
+    await expect(runAuthCodeFlow('https://accounts.example.test/auth', testT))
+      .rejects.toThrow('translated:background.sync.identityUnavailable');
+    expect(launchWebAuthFlow).not.toHaveBeenCalled();
+  });
+
+  it('runs OAuth through the sync-owned identity port when permission and APIs exist', async () => {
+    const launchWebAuthFlow = vi.fn(async () => (
+      'https://test-ext.chromiumapp.org/#code=authorization-code'
+    ));
+    vi.stubGlobal('chrome', {
+      runtime: { getManifest: () => ({ permissions: ['identity'] }) },
+      identity: {
+        getRedirectURL: () => 'https://test-ext.chromiumapp.org/',
+        launchWebAuthFlow,
+      },
+    });
+
+    expect(getOptionalRedirectUri()).toBe('https://test-ext.chromiumapp.org/');
+    await expect(runAuthCodeFlow('https://accounts.example.test/auth', testT))
+      .resolves.toBe('authorization-code');
+    expect(launchWebAuthFlow).toHaveBeenCalledWith({
+      url: 'https://accounts.example.test/auth',
+      interactive: true,
+    });
   });
 
   it('caches access tokens and reuses them until expiry', async () => {

@@ -9,6 +9,8 @@ export const REQUIRED_HOST_RUNTIME_FILES = [
   'framing.mjs',
   'logger.mjs',
   'os-adapter.mjs',
+  'package-metadata.mjs',
+  'package.json',
   'picker-provider.mjs',
   'process-provider.mjs',
   'router.mjs',
@@ -19,6 +21,11 @@ export const REQUIRED_HOST_RUNTIME_FILES = [
 
 export function copyHostRuntime(nativeSourceDir, installDir) {
   cpSync(nativeSourceDir, installDir, { recursive: true, force: true });
+  const packageMetadataPath = resolve(nativeSourceDir, '..', 'package.json');
+  if (!existsSync(packageMetadataPath)) {
+    throw new Error(`Shell Host package metadata is missing: ${packageMetadataPath}`);
+  }
+  cpSync(packageMetadataPath, resolve(installDir, 'package.json'), { force: true });
   const hostPath = resolve(installDir, 'shell-mcp-host.mjs');
   const missing = getMissingHostRuntimeFiles(installDir);
   if (missing.length > 0) throw new Error(`Shell Host runtime copy is incomplete: ${missing.join(', ')}`);

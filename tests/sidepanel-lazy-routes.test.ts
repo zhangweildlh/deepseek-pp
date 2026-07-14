@@ -62,4 +62,15 @@ describe('sidepanel lazy route boundaries', () => {
     expect(source).toContain("lazy(() => import('./SavedPage'))");
     expect(source).toContain('<Suspense fallback={<RouteFallback />}>');
   });
+
+  it('keeps the rich chat renderer out of the empty Chat route graph', () => {
+    const messageSource = readFileSync('entrypoints/sidepanel/components/ChatMessage.tsx', 'utf8');
+    const richRendererSource = readFileSync('entrypoints/sidepanel/components/RichMessageContent.tsx', 'utf8');
+
+    expect(messageSource).toContain("lazy(() => import('./RichMessageContent'))");
+    expect(messageSource).not.toContain("from 'react-markdown'");
+    expect(messageSource).toContain('<RichMessageErrorBoundary text={message.text}>');
+    expect(messageSource).toContain('fallback={<PlainTextMessageContent text={message.text} />}');
+    expect(richRendererSource).toContain("from 'react-markdown'");
+  });
 });

@@ -91,19 +91,21 @@ export const INSTALLER_LOCATION_FIXTURES = [
 
 export const INSTALLER_CURRENT_GAPS = [
   {
-    name: 'Shell initialize reports 1.0.0 while the npm package reports 1.10.0',
-    target: 'single-host-version-source-after-T4.5',
-  },
-  {
     name: 'OfficeCLI installation occurs after host files and manifest are committed',
-    target: 'explicit-install-journal-or-partial-state-after-T4.5',
+    status: 'deferred',
+    owner: 'deferred:installer-transactionality',
+    target: 'explicit-install-journal-or-partial-state',
   },
   {
     name: 'missing checksum metadata permits installation to continue',
-    target: 'fail-closed-checksum-policy-after-T4.5',
+    status: 'deferred',
+    owner: 'deferred:installer-integrity-policy',
+    target: 'fail-closed-checksum-policy',
   },
   {
     name: 'Windows registry failure is warning-only and status does not verify the registered value',
-    target: 'observable-registry-health-after-T5.1',
+    status: 'deferred',
+    owner: 'deferred:installer-registry-health',
+    target: 'observable-registry-health',
   },
 ] as const;

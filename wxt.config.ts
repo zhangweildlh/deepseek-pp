@@ -42,22 +42,26 @@ function readPackageVersion(): string {
   return packageJson.version;
 }
 
-function createManifest(env: ConfigEnv): UserManifest {
+export function createManifest(env: ConfigEnv): UserManifest {
   const isFirefox = env.browser === 'firefox';
   const isChromiumTarget = CHROMIUM_BROWSERS.has(env.browser);
-  const permissions = ['storage', 'alarms', 'nativeMessaging', 'contextMenus'];
-  // identity: required for chrome.identity.launchWebAuthFlow (Google Drive / OneDrive OAuth).
+  const basePermissions = ['storage', 'alarms', 'nativeMessaging', 'contextMenus'];
+  // identity: required for identity.launchWebAuthFlow (Google Drive / OneDrive OAuth)
+  // on every supported PC browser.
   // The providers' fixed API hosts are declared as required host_permissions below
   // so the background service worker can fetch them without a runtime permission
   // request; WebDAV URLs are arbitrary and stay in optional_host_permissions.
-  const chromiumPermissions = [...permissions, 'offscreen', 'debugger', 'tabs', 'identity'];
+  const chromiumPermissions = [...basePermissions, 'offscreen', 'debugger', 'tabs', 'identity'];
+  const firefoxPermissions = [...basePermissions, 'identity'];
 
   return {
     default_locale: 'en',
     name: MANIFEST_NAME,
     description: MANIFEST_DESCRIPTION,
     version: extensionVersion,
-    permissions: isChromiumTarget ? [...chromiumPermissions, 'sidePanel'] : permissions,
+    permissions: isChromiumTarget
+      ? [...chromiumPermissions, 'sidePanel']
+      : isFirefox ? firefoxPermissions : basePermissions,
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     host_permissions: [
       // DeepSeek + Bing: core extension hosts.

@@ -146,7 +146,9 @@ export const DEEPSEEK_SSE_CURRENT_GAPS = [
     name: 'malformed event JSON is silently represented as null',
     wire: 'data: {bad json}\n\n',
     currentBehavior: 'parse-null-without-diagnostic',
-    target: 'observable-protocol-error-after-T5.1',
+    status: 'deferred',
+    owner: 'deferred:deepseek-stream-observability',
+    target: 'observable-protocol-error',
   },
 ] as const;
 

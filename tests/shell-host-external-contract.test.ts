@@ -47,11 +47,13 @@ describe('Shell Native Host external contract', () => {
       result: {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: SHELL_HOST_CONTRACT.initializedServer,
+        serverInfo: {
+          name: SHELL_HOST_CONTRACT.initializedServer.name,
+          version: shellPackage.version,
+        },
         instructions: SHELL_HOST_CONTRACT.instructions,
       },
     });
-    expect(INSTALLER_CURRENT_GAPS[0].target).toBe('single-host-version-source-after-T4.5');
   });
 
   it('compares the exact 12-tool order, complete host schemas, and TypeScript risks', async () => {
@@ -186,11 +188,23 @@ describe('Shell Host installer external contract', () => {
       .toThrow('--extension-id is required for Chrome/Edge/Chromium.');
   });
 
-  it('keeps partial install, checksum skip, and Windows registry behavior classified as gaps', () => {
-    expect(INSTALLER_CURRENT_GAPS.slice(1).map((gap) => gap.target)).toEqual([
-      'explicit-install-journal-or-partial-state-after-T4.5',
-      'fail-closed-checksum-policy-after-T4.5',
-      'observable-registry-health-after-T5.1',
+  it('keeps partial install, checksum skip, and Windows registry behavior explicitly deferred', () => {
+    expect(INSTALLER_CURRENT_GAPS.map(({ status, owner, target }) => ({ status, owner, target }))).toEqual([
+      {
+        status: 'deferred',
+        owner: 'deferred:installer-transactionality',
+        target: 'explicit-install-journal-or-partial-state',
+      },
+      {
+        status: 'deferred',
+        owner: 'deferred:installer-integrity-policy',
+        target: 'fail-closed-checksum-policy',
+      },
+      {
+        status: 'deferred',
+        owner: 'deferred:installer-registry-health',
+        target: 'observable-registry-health',
+      },
     ]);
   });
 });

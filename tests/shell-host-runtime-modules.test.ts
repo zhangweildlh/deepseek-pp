@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -14,6 +14,7 @@ import { createNativeMessageChannel, NATIVE_EOF } from '../packages/shell-host/n
 import { createToolRegistry } from '../packages/shell-host/native/router.mjs';
 
 const tempRoots: string[] = [];
+const shellPackage = readJson(resolve('packages/shell-host/package.json'));
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -87,11 +88,61 @@ describe('Shell Host modular runtime ownership', () => {
     })).resolves.toMatchObject({
       jsonrpc: '2.0',
       id: 'initialize',
-      result: { serverInfo: { name: 'deepseek-pp-shell', version: '1.0.0' } },
+      result: { serverInfo: { name: 'deepseek-pp-shell', version: shellPackage.version } },
     });
 
     rmSync(join(installDir, 'router.mjs'));
     expect(getMissingHostRuntimeFiles(installDir)).toEqual(['router.mjs']);
+  });
+
+  it('reads package metadata from an installed npm package layout', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'deepseek-pp-shell-npm-layout-'));
+    tempRoots.push(tempRoot);
+    const packDir = tempRoot;
+    const installDir = join(tempRoot, 'installed');
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const packOutput = execFileSync(npm, [
+      'pack',
+      '--json',
+      '--pack-destination',
+      packDir,
+    ], {
+      cwd: resolve('packages/shell-host'),
+      encoding: 'utf8',
+    });
+    const [{ filename }] = JSON.parse(packOutput) as Array<{ filename: string }>;
+    const tarball = resolve(packDir, filename);
+    execFileSync(npm, [
+      'install',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--package-lock=false',
+      '--prefix',
+      installDir,
+      tarball,
+    ], { stdio: 'pipe' });
+
+    const installedRoot = join(installDir, 'node_modules', shellPackage.name);
+    const installedPackage = readJson(join(installedRoot, 'package.json'));
+    const hostPath = join(installedRoot, 'native', 'shell-mcp-host.mjs');
+    expect(existsSync(hostPath)).toBe(true);
+
+    await expect(callHost(hostPath, {
+      protocol: 'deepseek-pp-mcp-native',
+      version: 1,
+      server: { id: 'npm-layout' },
+      message: {
+        jsonrpc: '2.0',
+        id: 'initialize',
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18' },
+      },
+    })).resolves.toMatchObject({
+      jsonrpc: '2.0',
+      id: 'initialize',
+      result: { serverInfo: { name: 'deepseek-pp-shell', version: installedPackage.version } },
+    });
   });
 
   it('preserves the explicit shell timeout result through the process provider', async () => {
@@ -158,4 +209,8 @@ function callHost(hostPath: string, envelope: unknown): Promise<any> {
     });
     child.stdin.end(createNativeFrame(envelope));
   });
+}
+
+function readJson(path: string): any {
+  return JSON.parse(readFileSync(path, 'utf8'));
 }

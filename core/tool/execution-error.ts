@@ -1,3 +1,5 @@
+export const INCOMPLETE_TOOL_CALL_ERROR_CODE = 'tool_call_incomplete';
+
 export class ToolPostEffectPersistenceError extends Error {
   readonly code = 'tool_post_effect_persistence_failed' as const;
   readonly retryable = false as const;

@@ -7,6 +7,20 @@ export function readOptionalChromeApi<T>(read: () => T): T | undefined {
   }
 }
 
+interface ChromeManifestReader {
+  getManifest?: () => {
+    permissions?: readonly string[];
+  };
+}
+
+export function hasDeclaredManifestPermission(
+  runtime: ChromeManifestReader | null | undefined,
+  permission: string,
+): boolean {
+  const manifest = readOptionalChromeApi(() => runtime?.getManifest?.());
+  return manifest?.permissions?.some((declared) => declared === permission) === true;
+}
+
 function isKnownUnavailableChromeApiError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes('is not allowed for specified extension ID') ||

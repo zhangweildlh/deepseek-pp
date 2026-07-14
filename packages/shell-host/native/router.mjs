@@ -1,12 +1,15 @@
 import { MCP_PROTOCOL_VERSION } from './contracts.mjs';
 
-export function createNativeRouter({ toolDefinitions, toolHandlerGroups, logger }) {
+export function createNativeRouter({ toolDefinitions, toolHandlerGroups, logger, serverVersion }) {
+  if (typeof serverVersion !== 'string' || serverVersion.trim().length === 0) {
+    throw new Error('Shell Host server version is missing from package metadata.');
+  }
   const toolHandlers = createToolRegistry(toolDefinitions, toolHandlerGroups);
   const methodHandlers = new Map([
     ['initialize', id => jsonRpcResult(id, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
-      serverInfo: { name: 'deepseek-pp-shell', version: '1.0.0' },
+      serverInfo: { name: 'deepseek-pp-shell', version: serverVersion },
       instructions: 'General-purpose shell execution host. Use shell_exec for local commands and python_exec only for short computation or validation snippets.',
     })],
     ['tools/list', id => jsonRpcResult(id, { tools: toolDefinitions })],

@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from 'react';
 import {
   DEFAULT_OFFICIAL_API_CHAT_CONFIG,
   normalizeOfficialApiChatConfig,
@@ -111,6 +119,11 @@ export default function ChatPage() {
       .map((item) => item.fileId as string)
     : [];
   const canSendMessage = !isStreaming && !hasUploadingImageAttachment && !hasFailedImageAttachment && !!inputText.trim();
+
+  const scrollMessagesToBottom = useCallback(() => {
+    const messageList = listRef.current;
+    if (messageList) messageList.scrollTop = messageList.scrollHeight;
+  }, []);
 
   function updateLastAssistant(update: (message: ChatMessageType) => ChatMessageType) {
     setMessages((prev) => {
@@ -251,10 +264,8 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [messages]);
+    scrollMessagesToBottom();
+  }, [messages, scrollMessagesToBottom]);
 
   const saveChatConfig = async (patch: Partial<OfficialApiChatConfig>) => {
     const next = normalizeOfficialApiChatConfig({ ...chatConfig, ...patch });
@@ -652,6 +663,7 @@ export default function ChatPage() {
             key={`${msg.role}-${index}-${msgSeq}`}
             message={msg}
             isStreaming={isStreaming && index === messages.length - 1 && msg.role === 'assistant'}
+            onRichContentRendered={scrollMessagesToBottom}
           />
         ))}
 

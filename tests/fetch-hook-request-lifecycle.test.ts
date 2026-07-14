@@ -168,6 +168,33 @@ describe('fetch hook request lifecycle', () => {
     expect(onRequestTerminal).toHaveBeenCalledOnce();
   });
 
+  it('publishes one terminal parse failure for a started tool call left open at EOF', async () => {
+    updateHookState({ toolDescriptors: [makeDescriptor('artifact_create')] });
+    const wire = [
+      'data: {"p":"response/content","o":"APPEND","v":"<artifact_create>{\\"filename\\":\\"unfinished.html\\""}',
+      'data: {"p":"response/status","v":"FINISHED"}',
+    ].join('\n\n') + '\n\n';
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(wire));
+        controller.close();
+      },
+    }));
+    const context = createRequestContext('{"prompt":"hello"}', { requestId: 'request-unclosed-tool' });
+
+    const wrapped = await interceptFetchResponse(Promise.resolve(response), context);
+    await wrapped.text();
+
+    expect(onToolCallStarted).toHaveBeenCalledOnce();
+    expect(onToolCall).toHaveBeenCalledOnce();
+    expect(onToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      id: onToolCallStarted.mock.calls[0][0].id,
+      parseError: expect.objectContaining({ code: 'tool_call_incomplete' }),
+      source: expect.objectContaining({ requestId: 'request-unclosed-tool' }),
+    }));
+    expect(onRequestTerminal).toHaveBeenCalledOnce();
+  });
+
   it('reads at most one upstream chunk ahead of a stalled consumer', async () => {
     const encoder = new TextEncoder();
     let pullCount = 0;

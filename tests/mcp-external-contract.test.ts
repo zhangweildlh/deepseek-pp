@@ -12,6 +12,7 @@ import {
   listMcpTools,
   normalizeJsonRpcResponse,
 } from '../core/mcp';
+import { parseJsonRpcSseMessage } from '../core/mcp/transports/common';
 import type {
   McpJsonRpcResponse,
   McpProtocolTransport,
@@ -24,6 +25,7 @@ import {
   MCP_NATIVE_ENVELOPE_FIXTURE,
   MCP_PROTOCOL_CONTRACT,
   MCP_PROTOCOL_NEGOTIATION_FIXTURES,
+  MCP_STRICT_RESPONSE_REJECTIONS,
 } from './fixtures/external-runtime/mcp';
 
 afterEach(() => {
@@ -208,28 +210,70 @@ describe('MCP and Native external contract', () => {
     expect(fetchMock).toHaveBeenCalledTimes(MCP_UNKNOWN_TRANSPORT_CONTRACT.networkRequests);
   });
 
-  it('records shallow response normalization without promoting malformed JSON-RPC to legal output', () => {
-    const normalized = normalizeJsonRpcResponse({
-      jsonrpc: '1.0',
-      id: 'wrong-id',
-      result: { value: true },
-      error: { code: -32000, message: 'also present' },
-    }, {
+  it('accepts exactly one correlated JSON-RPC result or error branch', () => {
+    const request = {
       jsonrpc: '2.0',
       id: 'expected-id',
       method: 'contract',
-    });
+    } as const;
 
-    expect(normalized).toEqual({
+    expect(normalizeJsonRpcResponse({
       jsonrpc: '2.0',
-      id: 'wrong-id',
+      id: 'expected-id',
       result: { value: true },
-      error: { code: -32000, message: 'also present' },
+    }, request)).toEqual({
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      result: { value: true },
     });
-    expect(MCP_CURRENT_GAPS[0].target).toBe('strict-json-rpc-response-codec-after-T3.5');
+    expect(normalizeJsonRpcResponse({
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      error: { code: -32000, message: 'server failed', data: { retryAfterMs: 10 } },
+    }, request)).toEqual({
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      error: { code: -32000, message: 'server failed', data: { retryAfterMs: 10 } },
+    });
   });
 
-  it('freezes structured, text-error, and current UTF-16 truncation output behavior', async () => {
+  it.each(MCP_STRICT_RESPONSE_REJECTIONS)('rejects malformed response: $name', ({ response }) => {
+    expect(() => normalizeJsonRpcResponse(response, {
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      method: 'contract',
+    })).toThrowError(expect.objectContaining({
+      code: 'mcp_response_invalid',
+      retryable: false,
+    }));
+  });
+
+  it('accepts legacy SSE server messages before the correlated response', () => {
+    const request = {
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      method: 'contract',
+    } as const;
+
+    expect(parseJsonRpcSseMessage(
+      '{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}',
+      request,
+    )).toBeNull();
+    expect(parseJsonRpcSseMessage(
+      '{"jsonrpc":"2.0","id":"server-request","method":"roots/list","params":{}}',
+      request,
+    )).toBeNull();
+    expect(parseJsonRpcSseMessage(
+      '{"jsonrpc":"2.0","id":"expected-id","result":{"ok":true}}',
+      request,
+    )).toEqual({
+      jsonrpc: '2.0',
+      id: 'expected-id',
+      result: { ok: true },
+    });
+  });
+
+  it('preserves structured and text-error output while truncating detail by UTF-8 bytes', async () => {
     const structured = await callMcpTool(
       mcpServer(),
       resultTransport({
@@ -262,22 +306,65 @@ describe('MCP and Native external contract', () => {
       resultTransport({ structuredContent: '中文🙂' }),
       { call: toolCall(), maxResultBytes: 3 },
     );
-    expect(truncated).toMatchObject({ truncated: true, detail: '中文\ud83d' });
-    expect(MCP_CURRENT_GAPS[1].target).toBe('byte-accurate-output-budget-after-T5.1');
+    expect(truncated).toMatchObject({ truncated: true, detail: '中' });
+    expect(new TextEncoder().encode(truncated.detail).byteLength).toBe(3);
+
+    const exactBoundary = await callMcpTool(
+      mcpServer(),
+      resultTransport({ structuredContent: '中文🙂' }),
+      { call: toolCall(), maxResultBytes: 10 },
+    );
+    expect(exactBoundary).toMatchObject({ truncated: false, detail: '中文🙂' });
+
+    const truncatedError = await callMcpTool(
+      mcpServer(),
+      resultTransport({ content: [{ type: 'text', text: '中文🙂' }], isError: true }),
+      { call: toolCall(), maxResultBytes: 3 },
+    );
+    expect(truncatedError).toMatchObject({
+      ok: false,
+      truncated: true,
+      detail: '中',
+      error: { message: '中' },
+    });
   });
 
-  it('keeps page-level tool-count overshoot executable but owned by T4.5', async () => {
-    const transport = resultTransport({
-      tools: [
-        { name: 'first', description: 'First tool', inputSchema: { type: 'object' } },
-        { name: 'second', description: 'Second tool', inputSchema: { type: 'object' } },
-      ],
-    });
+  it('caps paginated discovery exactly at maxToolCount', async () => {
+    const requestedCursors: Array<string | undefined> = [];
+    const pages = [
+      {
+        tools: [
+          { name: 'first', description: 'First tool', inputSchema: { type: 'object' } },
+          { name: 'second', description: 'Second tool', inputSchema: { type: 'object' } },
+        ],
+        nextCursor: 'page-2',
+      },
+      {
+        tools: [
+          { name: 'third', description: 'Third tool', inputSchema: { type: 'object' } },
+          { name: 'fourth', description: 'Fourth tool', inputSchema: { type: 'object' } },
+        ],
+        nextCursor: 'page-3',
+      },
+    ];
+    const transport: McpProtocolTransport = {
+      async request(request) {
+        const cursor = typeof request.params?.cursor === 'string' ? request.params.cursor : undefined;
+        requestedCursors.push(cursor);
+        const result = pages[requestedCursors.length - 1];
+        return { jsonrpc: '2.0', id: request.id, result } as McpJsonRpcResponse<any>;
+      },
+    };
     const server = mcpServer();
-    server.limits.maxToolCount = 1;
+    server.limits.maxToolCount = 3;
 
-    await expect(listMcpTools(server, transport)).resolves.toHaveLength(2);
-    expect(MCP_CURRENT_GAPS[2].target).toBe('explicit-shell-catalog-limit-after-T4.5');
+    await expect(listMcpTools(server, transport)).resolves.toMatchObject([
+      { annotations: { mcpToolName: 'first' } },
+      { annotations: { mcpToolName: 'second' } },
+      { annotations: { mcpToolName: 'third' } },
+    ]);
+    expect(requestedCursors).toEqual([undefined, 'page-2']);
+    expect(MCP_CURRENT_GAPS).toEqual([]);
   });
 });
 

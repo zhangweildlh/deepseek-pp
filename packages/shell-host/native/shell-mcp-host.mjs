@@ -6,6 +6,7 @@ import { createFileToolHandlers } from './file-provider.mjs';
 import { createNativeMessageChannel, NATIVE_EOF } from './framing.mjs';
 import { createHostLogger } from './logger.mjs';
 import { initializeHostEnvironment } from './os-adapter.mjs';
+import { readShellHostPackageMetadata } from './package-metadata.mjs';
 import { createPickerToolHandlers } from './picker-provider.mjs';
 import { createProcessToolHandlers } from './process-provider.mjs';
 import { createNativeRouter, jsonRpcError } from './router.mjs';
@@ -13,6 +14,7 @@ import { createSessionProvider } from './session-provider.mjs';
 import { createSkillToolHandlers } from './skill-provider.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const packageMetadata = readShellHostPackageMetadata();
 const logger = createHostLogger();
 initializeHostEnvironment(packageRoot, logger.logLine);
 
@@ -27,6 +29,7 @@ const router = createNativeRouter({
     sessionProvider.handlers,
   ],
   logger,
+  serverVersion: packageMetadata.version,
 });
 const channel = createNativeMessageChannel({ logLine: logger.logLine });
 

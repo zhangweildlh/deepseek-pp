@@ -466,10 +466,14 @@ function createStreamingResponseToolState(
       event.started.forEach(emitStarted);
       event.streamed.forEach(emitChunk);
       event.completed.forEach(emitCompleted);
+      event.failed.forEach(emitCompleted);
     },
     finish() {
       toolText.flush();
-      toolCalls.flush();
+      const event = toolCalls.flush();
+      event.streamed.forEach(emitChunk);
+      event.completed.forEach(emitCompleted);
+      event.failed.forEach(emitCompleted);
       notifyLegacyFallbackToolCalls();
     },
     getVisibleText() {

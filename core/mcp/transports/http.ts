@@ -7,6 +7,7 @@ import type {
   McpServerConfig,
 } from '../types';
 import {
+  McpTransportError,
   ensureMcpServerOriginPermission,
   fetchWithTimeout,
   getMcpEndpointUrl,
@@ -43,9 +44,8 @@ function createHttpTransport(
       });
     },
     async notify(notification, options) {
-      await sendHttpMessage(server, notification, {
+      await sendHttpNotification(server, notification, {
         timeoutMs: options?.timeoutMs,
-        maxResponseBytes: options?.maxResponseBytes,
         signal: options?.signal,
         session: state,
         streamableSession: transportOptions.session,
@@ -61,7 +61,7 @@ function createHttpTransport(
 
 async function sendHttpMessage<TParams extends Record<string, unknown> | undefined, TResult>(
   server: McpServerConfig,
-  message: McpJsonRpcRequest<TParams> | McpJsonRpcNotification,
+  message: McpJsonRpcRequest<TParams>,
   options: {
     timeoutMs?: number;
     maxResponseBytes?: number;
@@ -83,7 +83,7 @@ async function sendHttpMessage<TParams extends Record<string, unknown> | undefin
   }, timeoutMs);
   const rpcResponse = await readJsonRpcResponse<TResult>(
     response,
-    'id' in message ? message as McpJsonRpcRequest<TParams> : undefined,
+    message,
     { maxBytes: maxResponseBytes },
   );
   capturePendingStreamableSession(
@@ -94,6 +94,39 @@ async function sendHttpMessage<TParams extends Record<string, unknown> | undefin
     options.streamableSession ?? false,
   );
   return rpcResponse;
+}
+
+async function sendHttpNotification(
+  server: McpServerConfig,
+  notification: McpJsonRpcNotification,
+  options: {
+    timeoutMs?: number;
+    session?: McpHttpTransportState;
+    streamableSession?: boolean;
+    signal?: AbortSignal;
+  } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? server.timeouts.requestMs;
+  await ensureMcpServerOriginPermission(server);
+  const response = await fetchWithTimeout(getMcpEndpointUrl(server), {
+    method: 'POST',
+    credentials: 'omit',
+    headers: createRequestHeaders(server, options.session, options.streamableSession ?? false),
+    body: JSON.stringify(notification),
+    signal: options.signal,
+  }, timeoutMs);
+
+  try {
+    if (!response.ok) {
+      throw new McpTransportError(
+        'mcp_http_error',
+        `MCP server returned HTTP ${response.status}.`,
+        { retryable: response.status >= 500 },
+      );
+    }
+  } finally {
+    await response.body?.cancel().catch(() => undefined);
+  }
 }
 
 function createRequestHeaders(
@@ -117,7 +150,7 @@ function createRequestHeaders(
 function capturePendingStreamableSession<TResult>(
   session: McpHttpTransportState | undefined,
   response: Response,
-  message: McpJsonRpcRequest<any> | McpJsonRpcNotification,
+  message: McpJsonRpcRequest<any>,
   rpcResponse: McpJsonRpcResponse<TResult>,
   streamableSession: boolean,
 ): void {

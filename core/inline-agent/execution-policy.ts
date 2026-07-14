@@ -1,6 +1,7 @@
 import type { ToolExecutionRecord } from '../types';
+import { INCOMPLETE_TOOL_CALL_ERROR_CODE } from '../tool/execution-error';
 
-export const INCOMPLETE_TOOL_CALL_ERROR_CODE = 'tool_call_incomplete';
+export { INCOMPLETE_TOOL_CALL_ERROR_CODE } from '../tool/execution-error';
 
 export function selectContinuableToolExecutions(
   executions: readonly ToolExecutionRecord[],

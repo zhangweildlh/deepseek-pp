@@ -368,11 +368,14 @@ function createInlineAgentStreamState(input: {
 
       const event = toolCallParser.append(text);
       event.completed.forEach(addCompletedToolCall);
+      event.failed.forEach(addCompletedToolCall);
     },
     flush() {
       const finalVisibleText = visibleText.flush();
       postVisibleText(finalVisibleText);
-      toolCallParser.flush();
+      const event = toolCallParser.flush();
+      event.completed.forEach(addCompletedToolCall);
+      event.failed.forEach(addCompletedToolCall);
       addFallbackToolCalls();
       return {
         visibleText: finalVisibleText,

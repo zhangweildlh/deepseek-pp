@@ -87,11 +87,11 @@ describe('external platform capability contract', () => {
     expect(request).toHaveBeenCalledWith({ origins: ['https://mcp.example.test/*'] });
   });
 
-  it('records manifest/capability gaps while unknown environments fail closed', () => {
-    expect(isShellNativeHostSupported(null)).toBe(true);
+  it('matches manifest-backed capabilities while unloaded and unknown environments fail closed', () => {
+    expect(isShellNativeHostSupported(null)).toBe(false);
 
     vi.stubGlobal('chrome', chromiumApiProfile());
-    expect(getCurrentPlatformEnvironment().capabilities.downloads).toBe(true);
+    expect(getCurrentPlatformEnvironment().capabilities.downloads).toBe(false);
 
     vi.unstubAllGlobals();
     const unknown = getCurrentPlatformEnvironment();
@@ -99,11 +99,7 @@ describe('external platform capability contract', () => {
     expect(Object.values(unknown.capabilities).every((supported) => !supported)).toBe(true);
     expect(isShellNativeHostSupported(unknown)).toBe(false);
 
-    expect(PLATFORM_CURRENT_GAPS.map((gap) => gap.target)).toEqual([
-      'consumer-owned-download-contract-in-R4.7',
-      'consumer-owned-sync-capability-contract-in-R4.11',
-      'loaded-explicit-capability-state-in-R4.9',
-    ]);
+    expect(PLATFORM_CURRENT_GAPS).toEqual([]);
   });
 });
 
@@ -113,6 +109,19 @@ function chromiumApiProfile() {
       id: 'chromium-extension',
       sendMessage: vi.fn(),
       getURL: vi.fn(),
+      getManifest: vi.fn(() => ({
+        permissions: [
+          'storage',
+          'alarms',
+          'nativeMessaging',
+          'contextMenus',
+          'offscreen',
+          'debugger',
+          'tabs',
+          'identity',
+          'sidePanel',
+        ],
+      })),
       connectNative: vi.fn(),
     },
     storage: { local: {} },

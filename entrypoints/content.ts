@@ -30,7 +30,11 @@ import {
   LEGACY_TOOL_CALLS_OPEN_TAG,
   stripToolCalls,
 } from '../core/interceptor/tool-parser';
-import { augmentRequestBody } from '../core/interceptor/request-augmentation';
+import {
+  augmentDecodedRequestBody,
+  decodeDeepSeekRequestBody,
+  type DeepSeekRequestBody,
+} from '../core/interceptor/request-augmentation';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
 import { createRestoredArtifactToolResult } from '../core/artifact';
 import type { ResponseCompletePayload, ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
@@ -1077,6 +1081,7 @@ async function handleAugmentRequestBody(data: {
     if (!mainRequestId) {
       throw new Error('Request authorization identity is missing.');
     }
+    const decodedBody = decodeDeepSeekRequestBody(data.body);
     if (
       toolAuthorizationRequestAliases.has(mainRequestId) ||
       !pendingToolAuthorizationCorrelations.begin(mainRequestId)
@@ -1086,7 +1091,7 @@ async function handleAugmentRequestBody(data: {
     tracksPendingAlias = true;
     requestId = crypto.randomUUID();
 
-    const bodyWithMultimodalMedia = await consumePendingMultimodalMediaForRequest(data.body, {
+    const bodyWithMultimodalMedia = await consumePendingMultimodalMediaForRequest(decodedBody, {
       onLongRunning(timeoutMs) {
         postToMainWorld({
           type: 'AUGMENT_REQUEST_BODY_EXTEND_TIMEOUT',
@@ -1103,7 +1108,7 @@ async function handleAugmentRequestBody(data: {
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
     const project = await resolveProjectContextForRequestBody(bodyWithMultimodalMedia);
-    const result = augmentRequestBody(bodyWithMultimodalMedia, {
+    const result = augmentDecodedRequestBody(bodyWithMultimodalMedia, {
       memories: currentMemories,
       skills: currentSkills,
       activePreset: currentActivePreset,
@@ -1116,13 +1121,9 @@ async function handleAugmentRequestBody(data: {
       promptSettings: currentPromptSettings,
     });
 
-    if (result) {
-      currentRequestMessageCount = result.messageCount;
-      if (result.usedMemoryIds.length > 0) {
-        await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
-      }
-    } else {
-      await closeContentToolAuthorization(requestId);
+    currentRequestMessageCount = result.messageCount;
+    if (result.usedMemoryIds.length > 0) {
+      await sendRuntimeMessage({ type: 'TOUCH_MEMORIES', payload: { ids: result.usedMemoryIds } });
     }
 
     const requestAlreadyEnded = pendingToolAuthorizationCorrelations.activate(mainRequestId);
@@ -1135,14 +1136,12 @@ async function handleAugmentRequestBody(data: {
       type: 'AUGMENT_REQUEST_BODY_RESULT',
       id,
       ok: true,
-      result: result
-        ? {
-            body: result.body,
-            agentTaskPrompt: result.agentTaskPrompt,
-            requestId,
-            toolDescriptors: authorization.descriptors,
-          }
-        : null,
+      result: {
+        body: result.body,
+        agentTaskPrompt: result.agentTaskPrompt,
+        requestId,
+        toolDescriptors: authorization.descriptors,
+      },
     });
   } catch (error) {
     if (authorization) await closeContentToolAuthorization(requestId);
@@ -1170,14 +1169,9 @@ async function handleAugmentRequestBody(data: {
   }
 }
 
-async function resolveProjectContextForRequestBody(bodyStr: string): Promise<ResolvedProjectAugmentationContext | null> {
-  let body: { chat_session_id?: unknown; parent_message_id?: unknown; prompt?: unknown };
-  try {
-    body = JSON.parse(bodyStr) as { chat_session_id?: unknown; parent_message_id?: unknown; prompt?: unknown };
-  } catch {
-    return null;
-  }
-
+async function resolveProjectContextForRequestBody(
+  body: Readonly<DeepSeekRequestBody>,
+): Promise<ResolvedProjectAugmentationContext | null> {
   const sessionId = typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
     ? body.chat_session_id.trim()
     : getCurrentChatSessionId();
@@ -1198,15 +1192,10 @@ async function resolveProjectContextForRequestBody(bodyStr: string): Promise<Res
   return project ?? null;
 }
 
-function readRequestChatSessionId(bodyStr: string): string | null {
-  try {
-    const body = JSON.parse(bodyStr) as { chat_session_id?: unknown };
-    return typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
-      ? body.chat_session_id.trim()
-      : getCurrentChatSessionId();
-  } catch {
-    return getCurrentChatSessionId();
-  }
+function readRequestChatSessionId(body: Readonly<DeepSeekRequestBody>): string | null {
+  return typeof body.chat_session_id === 'string' && body.chat_session_id.trim()
+    ? body.chat_session_id.trim()
+    : getCurrentChatSessionId();
 }
 
 async function createContentToolAuthorization(input: {
@@ -2393,28 +2382,21 @@ function insertPromptText(text: string) {
 }
 
 async function consumePendingMultimodalMediaForRequest(
-  bodyStr: string,
+  body: Readonly<DeepSeekRequestBody>,
   options: { onLongRunning?: (timeoutMs: number) => void } = {},
-): Promise<string> {
+): Promise<DeepSeekRequestBody> {
   if (!multimodalMediaInputEnabled) {
     clearPendingMultimodalMedia();
-    return bodyStr;
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = JSON.parse(bodyStr);
-  } catch {
-    throw new Error(contentT('content.multimodalMedia.invalidRequest'));
+    return { ...body };
   }
 
   const mediaRouteKey = selectPendingMultimodalMediaRouteKey(body);
-  if (!mediaRouteKey) return bodyStr;
+  if (!mediaRouteKey) return { ...body };
 
   const media = getPendingMultimodalMediaForRoute(mediaRouteKey);
-  if (media.length === 0) return bodyStr;
+  if (media.length === 0) return { ...body };
 
-  const originalPrompt = typeof body.prompt === 'string' ? body.prompt : '';
+  const originalPrompt = body.prompt;
   if (!originalPrompt.trim()) {
     throw new Error(contentT('content.multimodalMedia.emptyPrompt'));
   }
@@ -2439,10 +2421,12 @@ async function consumePendingMultimodalMediaForRequest(
     });
     if (!response.ok) throw new Error(response.error || 'Multimodal analysis failed.');
 
-    body.prompt = buildMultimodalAnalysisPrompt(originalPrompt, response.analyses);
     clearPendingMultimodalMediaItems(media);
     setMultimodalMediaStatus(contentT('content.multimodalMedia.analyzed', { count: response.analyses.length }), 'info');
-    return JSON.stringify(body);
+    return {
+      ...body,
+      prompt: buildMultimodalAnalysisPrompt(originalPrompt, response.analyses),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setMultimodalMediaStatus(contentT('content.multimodalMedia.failed', { message }), 'error');
