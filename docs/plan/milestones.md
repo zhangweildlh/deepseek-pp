@@ -8,7 +8,7 @@ GitHub Milestone [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49
 
 ```yaml
 adaptive:
-  drift_score: 0
+  drift_score: 1
   strategy: "strict receiving boundaries with byte-compatible legal paths"
   thresholds:
     annotate: 1
@@ -26,7 +26,7 @@ GitHub Milestone [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50
 
 ```yaml
 adaptive:
-  drift_score: 0
+  drift_score: 1
   strategy: "independent desktop truth lanes followed by one evidence closure"
   thresholds:
     annotate: 1

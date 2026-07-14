@@ -4,27 +4,27 @@
 
 | Field | Value |
 |:--|:--|
-| Status | READY_FOR_PR |
+| Status | IN_REVIEW |
 | Baseline | `origin/main` / `450b5e2e8e2e61a73417c26840ef9d0224418eb6` |
 | Branch | `codex/pc-runtime-hardening-wave-2` |
 | Worktree | `/Users/zcl/code/deepseek-pp-worktrees/pc-runtime-hardening-wave-2` |
 | Tracking | `GITHUB_STANDARD` |
 | Run label | `spec:pc-runtime-hardening-wave-2-2026-07` |
-| Delivery | Seven acceptance Issues, one integration branch, one final PR |
+| Delivery | Seven acceptance Issues, one integration branch, one final PR [#402](https://github.com/zhu1090093659/deepseek-pp/pull/402) |
 | Scope | Desktop Chrome, Edge and Firefox only; Android/mobile remains removed |
-| Resume point | Record Issue telemetry, commit the integrated batch, push once, open one PR, then close through green remote checks |
+| Resume point | Wait for PR #402 remote checks, fix any reproducible failure, then record final closure and merge |
 
 ## GitHub Index
 
 | Phase | Milestone | Task | Issue | Status | Lane |
 |:--|:--|:--|:--|:--|:--:|
-| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.1 MCP response/budget authority | [#395](https://github.com/zhu1090093659/deepseek-pp/issues/395) | Ready for batch PR | A |
-| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.2 Strict request decode | [#396](https://github.com/zhu1090093659/deepseek-pp/issues/396) | Ready for batch PR | B1 |
-| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.3 Tool EOF terminal state | [#397](https://github.com/zhu1090093659/deepseek-pp/issues/397) | Ready for batch PR | B2 |
-| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.4 Platform capability/loading truth | [#398](https://github.com/zhu1090093659/deepseek-pp/issues/398) | Ready for batch PR | C |
-| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.5 Shell version/catalog truth | [#399](https://github.com/zhu1090093659/deepseek-pp/issues/399) | Ready for batch PR | D |
-| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.6 First-chat headroom | [#400](https://github.com/zhu1090093659/deepseek-pp/issues/400) | Ready for batch PR | E |
-| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.7 Gap reconciliation and closure | [#401](https://github.com/zhu1090093659/deepseek-pp/issues/401) | Local closure green; PR pending | F |
+| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.1 MCP response/budget authority | [#395](https://github.com/zhu1090093659/deepseek-pp/issues/395) | In PR #402 | A |
+| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.2 Strict request decode | [#396](https://github.com/zhu1090093659/deepseek-pp/issues/396) | In PR #402 | B1 |
+| 1 | [#49](https://github.com/zhu1090093659/deepseek-pp/milestone/49) | W2.3 Tool EOF terminal state | [#397](https://github.com/zhu1090093659/deepseek-pp/issues/397) | In PR #402 | B2 |
+| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.4 Platform capability/loading truth | [#398](https://github.com/zhu1090093659/deepseek-pp/issues/398) | In PR #402 | C |
+| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.5 Shell version/catalog truth | [#399](https://github.com/zhu1090093659/deepseek-pp/issues/399) | In PR #402 | D |
+| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.6 First-chat headroom | [#400](https://github.com/zhu1090093659/deepseek-pp/issues/400) | In PR #402 | E |
+| 2 | [#50](https://github.com/zhu1090093659/deepseek-pp/milestone/50) | W2.7 Gap reconciliation and closure | [#401](https://github.com/zhu1090093659/deepseek-pp/issues/401) | PR #402 checks pending | F |
 
 ## Active Decisions
 
@@ -78,3 +78,4 @@
 | 2026-07-14 | Created Milestones #49–#50 and Issues #395–#401 for one batch PR. |
 | 2026-07-14 | Completed W2.1–W2.6 implementation; independent reviews caught and closed Firefox OAuth, Side Panel lazy-failure/budget/scroll and MCP notification/SSE compatibility regressions. |
 | 2026-07-14 | Reconciled live gaps, preserved the explicit real-Chrome non-pass, and passed the full local quality closure. |
+| 2026-07-14 | Repaired Issue-template metadata after automatic governance closure, restored Issues #395–#401, recorded telemetry, and opened the single batch PR #402. |
