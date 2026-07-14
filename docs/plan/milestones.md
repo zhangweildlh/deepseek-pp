@@ -33,7 +33,7 @@ adaptive:
     replan: 2
     rescope: 3
   total_tasks: 4
-  completed_tasks: 3
+  completed_tasks: 4
 ```
 
 ## Scope Guard
