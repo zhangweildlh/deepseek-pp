@@ -1,6 +1,5 @@
 import {
   getAllMemories,
-  getAllMemoriesAlreadyLocked,
   getMemoryById,
   importMemoriesAtomically,
   saveMemory,
@@ -12,10 +11,8 @@ import {
 import { filterMemoriesByProjectScope } from '../core/memory/scope';
 import {
   getAllSkillSources,
-  getAllSkillSourcesAlreadyLocked,
   getAllSkills,
   getSkillLibrary,
-  getUserSkillsAlreadyLocked,
   saveSkill,
   setSkillEnabled,
   setSkillsEnabled,
@@ -35,7 +32,6 @@ import {
 } from '../core/skill/local-importer';
 import {
   getAllPresets,
-  getAllPresetsAlreadyLocked,
   savePreset,
   getActivePreset,
   setActivePresetId,
@@ -50,50 +46,17 @@ import { getExtensionVersion } from '../core/version';
 import {
   createBrowserSyncConfigStoragePort,
   createSyncConfigStore,
-  type VersionedOAuthSyncConfig,
 } from '../core/sync/config';
 import {
-  createSyncCommandErrorResponse,
   createSyncOperationCoordinator,
   type SyncDownloadResult,
 } from '../core/sync/operation-coordinator';
-import {
-  OPTIONAL_SYNC_FILE_KEYS,
-  REQUIRED_SYNC_FILE_KEYS,
-  SYNC_FILE_KEYS,
-  type SyncFileKey,
-} from '../core/sync/contracts';
-import {
-  readCurrentSyncGeneration,
-  uploadSyncGeneration,
-} from '../core/sync/generation';
-import { mergeLocalSkillImportsIntoSyncSnapshot } from '../core/sync/local-skill-merge';
-import { isSyncableSkill, isSyncableSkillSource } from '../core/skill/sync-policy';
 import {
   recoverPendingSyncLocalApply,
   runLocalStateMutationWithRecovery,
   stageAndApplySyncSnapshotLocally,
 } from '../core/sync/local-apply-runtime';
-import { withSyncLocalStateLock } from '../core/persistence/local-state-lock';
 import { createSyncRecoveryBarrier } from '../core/sync/recovery-barrier';
-import { createStorageBackend } from '../core/sync/backend-factory';
-import type { StorageBackend } from '../core/sync/storage-backend';
-import {
-  serializeSyncDataSnapshot,
-  type SyncDataSnapshot,
-} from '../core/sync/snapshot';
-import { authorizeGDrive } from '../core/sync/gdrive-client';
-import { authorizeOneDrive } from '../core/sync/onedrive-client';
-import {
-  parseValidatedArray,
-  parseValidatedJson,
-  validateSyncMemory,
-} from '../core/sync/schema';
-import { decodePresetCollection } from '../core/preset/codec';
-import {
-  decodeSkillSourceCollection,
-  decodeUserSkillCollection,
-} from '../core/skill/codec';
 import { clearToolCallHistory, getToolCallHistory } from '../core/tool/history';
 import {
   appendExternalizedToolPayloadChunk,
@@ -124,11 +87,9 @@ import {
   addConversationToProject,
   bindPendingProjectConversation,
   createProjectContext,
-  decodeProjectContextState,
   stageDeleteProjectContextAndMemoriesAlreadyLocked,
   formatProjectPromptContext,
   getProjectContextState,
-  getProjectContextStateAlreadyLocked,
   getProjectForConversation,
   getProjectPromptContextForConversation,
   refreshProjectConversation,
@@ -139,10 +100,8 @@ import {
 import { getArtifact } from '../core/artifact';
 import {
   deleteSavedItem,
-  decodeSavedItemsState,
   getAllSavedItems,
   getSavedItemsState,
-  getSavedItemsStateAlreadyLocked,
   saveSavedItem,
 } from '../core/saved-items';
 import {
@@ -188,34 +147,28 @@ import {
   isShellMcpServer,
 } from '../core/shell';
 import {
-  MULTIMODAL_MCP_REQUEST_TIMEOUT_MS,
-  canUseMultimodalMediaInput,
   createMultimodalMcpPresetInput,
-  isMultimodalAnalysisToolAllowed,
   isMultimodalMcpServer,
 } from '../core/multimodal';
-import {
-  assertSupportedMultimodalMedia,
-  MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN,
-  type MultimodalMediaAnalysisItem,
-  type MultimodalMediaAnalyzeRequest,
-  type MultimodalMediaAnalyzeResponse,
-  type MultimodalMediaInput,
-} from '../core/multimodal/media';
 import {
   clearMultimodalSettings,
   getMultimodalSettingsStatus,
   saveMultimodalSettings,
-  type MultimodalSettingsPatch,
 } from '../core/multimodal/settings';
 import { getWebToolSettings, setWebToolEnabled } from '../core/tool/web-settings';
-import { getAllScenarios, applyScenarioTemplate } from '../core/scenario/store';
+import {
+  addCustomScenario,
+  applyScenarioTemplate,
+  deleteScenario,
+  getAllScenarios,
+  saveScenario,
+} from '../core/scenario/store';
 import { getChatEnabled } from '../core/chat/store';
+import { pendingChatTextStore } from '../core/chat/pending-text';
 import {
   markChatLoopFinished,
   markChatLoopStarted,
   reconcileInterruptedChatLoop,
-  type ChatLoopProvider,
 } from '../core/chat/active-loop';
 import {
   clearDeepSeekApiKey,
@@ -226,9 +179,7 @@ import {
 } from '../core/chat/api-key';
 import {
   getOfficialApiChatConfig,
-  normalizeOfficialApiChatConfig,
   saveOfficialApiChatConfig,
-  type OfficialApiChatConfig,
 } from '../core/chat/official-api-config';
 import {
   createAutomation,
@@ -249,31 +200,27 @@ import {
   runAutomation,
   scanDueAutomations,
 } from '../core/automation/scheduler';
-import { validateAutomationSchedule } from '../core/automation/schedule';
 import {
   createChatSession,
   createPowHeadersForPath,
   createPowHeaders,
   DEEPSEEK_FILE_UPLOAD_PATH,
-  DEEPSEEK_IMAGE_UPLOAD_MAX_BYTES,
   submitPromptStreaming,
   loadClientHeadersFromStorage,
   uploadDeepSeekFile,
 } from '../core/deepseek/adapter';
 import { createDeepSeekAutomationClient } from '../core/deepseek/active-client';
-import {
-  submitOfficialDeepSeekStreaming,
-  type OfficialDeepSeekMessage,
-} from '../core/deepseek/official-api';
+import { submitOfficialDeepSeekStreaming } from '../core/deepseek/official-api';
 import { createDeepSeekConversationExportTransport } from '../core/deepseek/conversation-export';
 import {
   buildConversationExportArtifactsCancellable,
   runConversationExport,
 } from '../core/export/service';
-import { normalizeConversationExportRequest } from '../core/export/schema';
 import { buildPromptAugmentation } from '../core/prompt';
-import { extractToolCalls } from '../core/interceptor/tool-parser';
-import { broadcastRuntimeUpdate } from '../core/messaging/broadcast';
+import {
+  broadcastRuntimeUpdate,
+  isExpectedMissingRuntimeMessageReceiverError,
+} from '../core/messaging/broadcast';
 import { createBackgroundErrorResponse } from '../core/messaging/background-error';
 import {
   authorizeRuntimeMessage,
@@ -291,6 +238,14 @@ import { createPersistenceRuntimeHandlers } from './background/persistence-handl
 import { createToolRuntimeHandlers } from './background/tool-runtime-handlers';
 import { createTrustedToolExecutionContext } from './background/tool-execution-handlers';
 import {
+  createChatRuntimeService,
+  type ChatPromptBuildRequest,
+} from './background/chat-runtime-service';
+import { createDeepSeekRuntimeHandlers } from './background/deepseek-runtime-handlers';
+import { createBackgroundRuntimeHandlers } from './background/background-runtime-handlers';
+import { refreshDeepSeekAuthFromTabs } from './background/deepseek-auth-refresh';
+import { createSyncRuntimeService } from './background/sync-runtime-service';
+import {
   createTranslator,
   DEFAULT_LOCALE,
   type LocaleMessageKey,
@@ -306,19 +261,15 @@ import type {
   CurrentDeepSeekConversation,
   DeepSeekTheme,
   PetConfig,
-  SyncConfig,
-  SyncCounts,
   ToolCall,
   ToolDescriptor,
-  ToolExecutionRecord,
   ToolExecutionTrigger,
   ToolResult,
-  UsageTurnInput,
 } from '../core/types';
 import type { McpServerConfig } from '../core/mcp/types';
-import type { AutomationCreateInput, AutomationRunnerRequest, AutomationRunnerResult, AutomationStatus, AutomationUpdateInput } from '../core/automation/types';
+import type { AutomationRunnerRequest, AutomationRunnerResult } from '../core/automation/types';
 import type { AutomationExecutionContext } from '../core/automation/execution';
-import type { ConversationExportProgress, ConversationExportResult } from '../core/export/types';
+import type { ConversationExportProgress } from '../core/export/types';
 
 const DEEPSEEK_HOME_URL = 'https://chat.deepseek.com/';
 const DEEPSEEK_TAB_URL_PATTERN = '*://chat.deepseek.com/*';
@@ -326,10 +277,6 @@ const REFRESH_AUTH_MESSAGE = { type: 'REFRESH_DEEPSEEK_AUTH' } as const;
 const AUTOMATION_AUTH_TOKEN_MISSING_MESSAGE =
   'DeepSeek login token is missing. Refresh chat.deepseek.com or sign in again, then retry the automation.';
 const deepSeekAutomationClient = createDeepSeekAutomationClient();
-let chatSessionId: string | null = null;
-let chatParentMessageId: number | null = null;
-let officialApiChatMessages: OfficialDeepSeekMessage[] = [];
-const conversationExportControllers = new Map<string, AbortController>();
 const externalPayloadAuthorizationCache = new ExternalPayloadAuthorizationCache();
 const {
   executeToolCall: executeRuntimeToolCall,
@@ -340,6 +287,42 @@ const {
 let currentBackgroundLocale: SupportedLocale = DEFAULT_LOCALE;
 let currentBackgroundTranslator = createTranslator(DEFAULT_LOCALE);
 let sandboxOffscreenCreation: Promise<void> | null = null;
+const chatRuntimeService = createChatRuntimeService({
+  getChatEnabled,
+  getDeepSeekApiKey,
+  getOfficialApiChatConfig,
+  loadClientHeaders: loadOrRefreshClientHeaders,
+  getModelType,
+  buildPrompt: buildSidepanelPrompt,
+  executeToolCall: (call, options) => executeBackgroundRuntimeToolCall(
+    call,
+    'sidepanel_chat',
+    options,
+  ),
+  createChatSession: (headers, signal) => createChatSession(headers, signal),
+  createPowHeaders: (headers, signal) => createPowHeaders(headers, undefined, signal),
+  createUploadPowHeaders: (headers, signal) => createPowHeadersForPath(
+    headers,
+    DEEPSEEK_FILE_UPLOAD_PATH,
+    undefined,
+    signal,
+  ),
+  submitWebPrompt: submitPromptStreaming,
+  submitOfficialPrompt: submitOfficialDeepSeekStreaming,
+  uploadFile: uploadDeepSeekFile,
+  markChatLoopStarted,
+  markChatLoopFinished,
+  reconcileInterruptedChatLoop,
+  broadcastChunk: broadcastChatChunk,
+  continueWithToolResults: (toolResults) => backgroundT(
+    'background.chat.continueWithToolResults',
+    { toolResults },
+  ),
+  maxToolStepsMessage: () => backgroundT('background.chat.maxToolSteps'),
+  missingAuthMessage: () => backgroundT('background.auth.missingDeepSeek'),
+  interruptedMessage: () => backgroundT('background.chat.interrupted'),
+  reportError: reportBackgroundStartupError,
+});
 const syncLocalRecoveryBarrier = createSyncRecoveryBarrier({
   recover: recoverPendingSyncLocalApply,
   async notifyReady() {
@@ -378,11 +361,17 @@ const syncConfigStore = createSyncConfigStore(
     commitIndeterminateMessage: () => backgroundT('background.sync.configCommitIndeterminate'),
   },
 );
+const syncRuntimeService = createSyncRuntimeService({
+  translate: (key, params) => backgroundT(key, params),
+  beginLocalApply(stage) {
+    return syncLocalRecoveryBarrier.trackApply(stageAndApplySyncSnapshotLocally(stage));
+  },
+});
 const syncOperationCoordinator = createSyncOperationCoordinator(syncConfigStore, {
-  test: testSyncTarget,
-  authorize: authorizeSyncTarget,
-  upload: uploadLocalSyncTarget,
-  download: downloadRemoteSyncTarget,
+  test: syncRuntimeService.test,
+  authorize: syncRuntimeService.authorize,
+  upload: syncRuntimeService.upload,
+  download: syncRuntimeService.download,
   authorizationNotRequiredMessage: () => backgroundT('background.sync.authorizationNotRequired'),
 });
 const SANDBOX_OFFSCREEN_URL = 'sandbox-offscreen.html';
@@ -540,8 +529,85 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         broadcastToolCallHistoryUpdate,
       },
     }),
+    ...createDeepSeekRuntimeHandlers({
+      auth: {
+        hasDeepSeekApiKey,
+        saveDeepSeekApiKey,
+        clearDeepSeekApiKey,
+        resetChatSession: () => chatRuntimeService.resetSession(),
+        refreshContextMenus: createContextMenus,
+        getChatAuthStatus,
+        broadcastChatAuthStatus,
+      },
+      multimodal: {
+        getSettingsStatus: getMultimodalSettingsStatus,
+        saveSettings: saveMultimodalSettings,
+        clearSettings: clearMultimodalSettings,
+        getMcpServers: () => getAllMcpServers({ includeSecrets: false }),
+        executeToolCall: (call, options) => executeBackgroundRuntimeToolCall(
+          call,
+          'manual_chat',
+          options,
+        ),
+        broadcastToolCallHistoryUpdate,
+      },
+      chat: {
+        service: chatRuntimeService,
+        getOfficialApiChatConfig,
+        saveOfficialApiChatConfig,
+      },
+      conversationExport: {
+        baseUrl: new URL(DEEPSEEK_HOME_URL).origin,
+        getExtensionVersion,
+        createExportId: () => crypto.randomUUID(),
+        loadClientHeaders: loadOrRefreshClientHeaders,
+        createTransport: ({ baseUrl, clientHeaders }) => (
+          createDeepSeekConversationExportTransport({
+            baseUrl,
+            clientHeaders,
+            fetchImpl: fetch,
+          })
+        ),
+        runExport: runConversationExport,
+        buildArtifacts: buildConversationExportArtifactsCancellable,
+        broadcastProgress: broadcastConversationExportProgress,
+        missingAuthMessage: () => backgroundT('background.auth.missingDeepSeek'),
+        generatingMessage: () => backgroundT('background.export.generating'),
+        cancelledMessage: () => backgroundT('background.export.cancelled'),
+      },
+    }),
+    ...createBackgroundRuntimeHandlers({
+      usage: {
+        recordUsageTurn,
+        getUsageSummary,
+        clearUsageRecords,
+      },
+      sync: {
+        coordinator: syncOperationCoordinator,
+        notifyDownloadedState: notifyDownloadedSyncState,
+      },
+      automation: {
+        getAllAutomations,
+        getAutomationRuns,
+        createAutomation,
+        updateAutomation,
+        setAutomationStatus,
+        deleteAutomation,
+        refreshAutomationNextRunAt,
+        cancelActiveAutomationRun,
+        runAutomationNow,
+        broadcastAutomationUpdate,
+        broadcastAutomationRunsUpdate,
+      },
+      scenario: {
+        getAllScenarios,
+        saveScenario,
+        addCustomScenario,
+        deleteScenario,
+        refreshScenarioMenus: createContextMenus,
+      },
+    }),
   ],
-  handleLegacy: handleLegacyMessage,
 });
 
 function backgroundT(key: LocaleMessageKey, params?: MessageParams): string {
@@ -563,8 +629,9 @@ type ActionApi = {
 };
 
 export default defineBackground(() => {
-  void syncLocalRecoveryBarrier.ensureReady().catch(() => undefined);
+  void syncLocalRecoveryBarrier.ensureReady().catch(acknowledgeReportedSyncRecoveryFailure);
   enableSidePanelActionClick();
+  registerContextMenuClickListener();
   registerWhatsNewInstallListener();
   registerAutomationAlarmListener();
   refreshBackgroundLocale()
@@ -583,15 +650,16 @@ export default defineBackground(() => {
   syncLocalRecoveryBarrier.ensureReady()
     .then(() => archiveStaleMemories()
       .catch((error) => reportBackgroundStartupError('archive_stale_memories_failed', error)))
-    .catch(() => undefined);
+    .catch(acknowledgeReportedSyncRecoveryFailure);
   ensureBuiltInMcpPresets().catch((error) => reportBackgroundStartupError('builtin_mcp_presets_failed', error));
   refreshWhatsNewBadge().catch((error) => reportBackgroundStartupError('whats_new_badge_failed', error));
   ensureAutomationWakeAlarm().catch((error) => reportBackgroundStartupError('automation_alarm_create_failed', error));
-  reconcileInterruptedChatLoopOnWake().catch((error) => reportBackgroundStartupError('chat_loop_reconcile_failed', error));
+  chatRuntimeService.reconcileInterruptedOnWake()
+    .catch((error) => reportBackgroundStartupError('chat_loop_reconcile_failed', error));
   syncLocalRecoveryBarrier.ensureReady()
     .then(() => scanDueAutomationsFromWake()
       .catch((error) => reportBackgroundStartupError('automation_startup_scan_failed', error)))
-    .catch(() => undefined);
+    .catch(acknowledgeReportedSyncRecoveryFailure);
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let envelope: RuntimeMessageEnvelope | undefined;
@@ -624,7 +692,8 @@ export default defineBackground(() => {
     if ('deepseek_pp_chat_enabled' in changes || DEEPSEEK_API_KEY_STORAGE_KEY in changes) {
       createContextMenus()
         .catch((error) => reportBackgroundStartupError('context_menu_refresh_failed', error));
-      broadcastChatAuthStatus().catch(() => {});
+      broadcastChatAuthStatus()
+        .catch((error) => reportBackgroundStartupError('chat_auth_broadcast_failed', error));
     }
   });
 });
@@ -635,13 +704,8 @@ function registerAutomationAlarmListener() {
     syncLocalRecoveryBarrier.ensureReady()
       .then(() => scanDueAutomationsFromWake()
         .catch((error) => reportBackgroundStartupError('automation_alarm_scan_failed', error)))
-      .catch(() => undefined);
+      .catch(acknowledgeReportedSyncRecoveryFailure);
   });
-}
-
-function beginSyncLocalApply(stage: () => Promise<SyncDataSnapshot>) {
-  const operation = stageAndApplySyncSnapshotLocally(stage);
-  return syncLocalRecoveryBarrier.trackApply(operation);
 }
 
 async function ensureAutomationWakeAlarm() {
@@ -724,8 +788,11 @@ async function createContextMenus() {
   }
 }
 
-try {
-  chrome.contextMenus.onClicked.addListener(async (info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) => {
+function registerContextMenuClickListener(): void {
+  chrome.contextMenus.onClicked.addListener(async (
+    info: chrome.contextMenus.OnClickData,
+    tab?: chrome.tabs.Tab,
+  ) => {
     if (!info.selectionText) return;
     const selectedText = info.selectionText.trim();
     if (!selectedText) return;
@@ -733,14 +800,16 @@ try {
     // Open the sidepanel before async boundaries so the user gesture remains valid.
     const tabId = tab?.id;
     if (tabId && chrome.sidePanel?.open) {
-      chrome.sidePanel.open({ tabId }).catch(() => {});
+      chrome.sidePanel.open({ tabId })
+        .catch((error) => reportBackgroundStartupError('context_menu_sidepanel_open_failed', error));
     }
 
     const chatEnabled = await getChatEnabled();
     if (!chatEnabled) return;
 
     if (info.menuItemId === 'send-to-chat') {
-      openSidePanelAndSendText(selectedText, tab).catch(() => {});
+      openSidePanelAndSendText(selectedText)
+        .catch((error) => reportBackgroundStartupError('pending_chat_text_write_failed', error));
       return;
     }
 
@@ -751,21 +820,20 @@ try {
           const scenario = scenarios.find((s) => s.id === scenarioId);
           if (!scenario) return;
           const processed = applyScenarioTemplate(scenario.template, selectedText);
-          return openSidePanelAndSendText(processed, tab);
+          return openSidePanelAndSendText(processed);
         })
         .catch((error) => reportBackgroundStartupError('scenario_context_menu_failed', error));
       return;
     }
   });
-} catch {}
+}
 
-async function openSidePanelAndSendText(text: string, tab?: chrome.tabs.Tab) {
-  // Persist to storage as a fallback because the sidepanel may not be ready for messages yet.
-  try {
-    await chrome.storage.local.set({ pendingChatText: text });
-  } catch {}
-
-  chrome.runtime.sendMessage({ type: 'OPEN_CHAT_WITH_TEXT', text }).catch(() => {});
+async function openSidePanelAndSendText(text: string) {
+  await pendingChatTextStore.write(text);
+  void chrome.runtime.sendMessage({ type: 'OPEN_CHAT_WITH_TEXT', text }).catch((error) => {
+    if (isExpectedMissingRuntimeMessageReceiverError(error)) return;
+    reportBackgroundStartupError('pending_chat_text_notification_failed', error);
+  });
 }
 
 async function ensureBuiltInMcpPresets() {
@@ -810,215 +878,17 @@ function reportBackgroundStartupError(code: string, error: unknown) {
   console.error(`[DeepSeek++] ${code}: ${detail}`, error);
 }
 
+function acknowledgeReportedSyncRecoveryFailure(error: unknown): void {
+  // The recovery barrier invokes onRecoveryFailure before rejecting. Startup
+  // observers consume that already-reported rejection to prevent an unhandled promise.
+  void error;
+}
+
 async function handleMessage(
   message: RuntimeMessageEnvelope,
   context: RuntimeMessageContext,
 ) {
   return runtimeCommandRegistry.dispatch(message, context);
-}
-
-async function handleLegacyMessage(
-  message: { type: string; payload?: unknown },
-  context: RuntimeMessageContext,
-) {
-  switch (message.type) {
-    case 'GET_DEEPSEEK_API_KEY_STATUS':
-      return { ok: true, configured: await hasDeepSeekApiKey() };
-
-    case 'SAVE_DEEPSEEK_API_KEY': {
-      const { apiKey } = message.payload as { apiKey?: string };
-      await saveDeepSeekApiKey(apiKey ?? '');
-      officialApiChatMessages = [];
-      await createContextMenus();
-      await broadcastChatAuthStatus(context.tabId);
-      return { ok: true, configured: true };
-    }
-
-    case 'CLEAR_DEEPSEEK_API_KEY':
-      await clearDeepSeekApiKey();
-      officialApiChatMessages = [];
-      await createContextMenus();
-      await broadcastChatAuthStatus(context.tabId);
-      return { ok: true, configured: false };
-
-    case 'GET_MULTIMODAL_SETTINGS_STATUS':
-      return { ok: true, ...(await getMultimodalSettingsStatus()) };
-
-    case 'SAVE_MULTIMODAL_SETTINGS':
-      return { ok: true, ...(await saveMultimodalSettings(message.payload as MultimodalSettingsPatch)) };
-
-    case 'CLEAR_MULTIMODAL_SETTINGS':
-      return { ok: true, ...(await clearMultimodalSettings()) };
-
-    case 'ANALYZE_MULTIMODAL_MEDIA': {
-      const response = await analyzeMultimodalMedia(message.payload as MultimodalMediaAnalyzeRequest);
-      await broadcastToolCallHistoryUpdate(context.tabId);
-      if (!response.ok) {
-        return {
-          ok: false,
-          error: response.error ?? 'multimodal_analysis_failed',
-          analyses: response.analyses,
-        };
-      }
-      return response;
-    }
-
-    case 'RECORD_USAGE_TURN':
-      return recordUsageTurn(message.payload as UsageTurnInput);
-
-    case 'GET_USAGE_SUMMARY': {
-      const { rangeDays } = (message.payload ?? {}) as { rangeDays?: unknown };
-      return getUsageSummary(rangeDays);
-    }
-
-    case 'CLEAR_USAGE_STATS':
-      await clearUsageRecords();
-      return { ok: true };
-
-    case 'GET_SYNC_CONFIG':
-      return syncOperationCoordinator.getConfig();
-
-    case 'SAVE_SYNC_CONFIG': {
-      return handleSyncCommand(() => syncOperationCoordinator.save(message.payload));
-    }
-
-    case 'WEBDAV_TEST': {
-      return handleSyncCommand(() => syncOperationCoordinator.test(message.payload));
-    }
-
-    case 'SYNC_AUTHORIZE': {
-      return handleSyncCommand(() => syncOperationCoordinator.authorize(message.payload));
-    }
-
-    case 'WEBDAV_UPLOAD_LOCAL': {
-      return handleSyncCommand(() => syncOperationCoordinator.upload(message.payload));
-    }
-
-    case 'WEBDAV_DOWNLOAD_REMOTE': {
-      return handleSyncCommand(() => syncOperationCoordinator.download(
-        message.payload,
-        (result) => notifyDownloadedSyncState(result, context),
-      ));
-    }
-
-    case 'CHAT_SUBMIT_PROMPT': {
-      const { text, config, refFileIds } = message.payload as {
-        text: string;
-        config?: Partial<OfficialApiChatConfig>;
-        refFileIds?: unknown;
-      };
-      if (!(await getChatEnabled())) {
-        return { ok: false, error: 'chat_disabled' };
-      }
-      if (!text?.trim()) return { ok: false, error: 'empty_prompt' };
-      // Fire and forget — the streaming response is broadcast
-      handleChatSubmitPrompt(text, config, coerceRefFileIds(refFileIds), context.tabId).catch(() => {});
-      return { ok: true };
-    }
-
-    case 'UPLOAD_DEEPSEEK_IMAGE':
-      return handleDeepSeekImageUpload(message.payload, context.tabId);
-
-    case 'CHAT_NEW_SESSION':
-      chatSessionId = null;
-      chatParentMessageId = null;
-      officialApiChatMessages = [];
-      return { ok: true };
-
-    case 'GET_AUTH_STATUS': {
-      return getChatAuthStatus(context.tabId);
-    }
-
-    case 'GET_OFFICIAL_API_CHAT_CONFIG':
-      return getOfficialApiChatConfig();
-
-    case 'SAVE_OFFICIAL_API_CHAT_CONFIG':
-      return saveOfficialApiChatConfig(message.payload);
-
-    case 'EXPORT_DEEPSEEK_CONVERSATIONS':
-      return handleConversationExport(message.payload, context.tabId);
-
-    case 'CANCEL_DEEPSEEK_EXPORT': {
-      const { exportId } = message.payload as { exportId?: string };
-      if (!exportId) return { ok: false, error: 'missing_export_id' };
-      const controller = conversationExportControllers.get(exportId);
-      if (!controller) return { ok: false, error: 'export_not_running' };
-      controller.abort();
-      conversationExportControllers.delete(exportId);
-      await broadcastConversationExportProgress({
-        exportId,
-        phase: 'cancelled',
-        status: 'cancelled',
-        current: 0,
-        total: 0,
-        message: backgroundT('background.export.cancelled'),
-      }, context.tabId);
-      return { ok: true };
-    }
-
-    case 'AUTH_STATUS_CHANGED': {
-      await broadcastChatAuthStatus(context.tabId);
-      return { ok: true };
-    }
-
-    case 'GET_AUTOMATIONS':
-      return getAllAutomations();
-
-    case 'GET_AUTOMATION_RUNS': {
-      const { automationId, limit } = message.payload as { automationId: string; limit?: number };
-      return getAutomationRuns({ automationId, limit });
-    }
-
-    case 'CREATE_AUTOMATION': {
-      const input = message.payload as AutomationCreateInput;
-      validateAutomationInput(input);
-      const automation = await createAutomation(input);
-      const refreshed = await refreshAutomationNextRunAt(automation.id);
-      await broadcastAutomationUpdate(context.tabId);
-      return refreshed ?? automation;
-    }
-
-    case 'UPDATE_AUTOMATION': {
-      const { id, patch } = message.payload as { id: string; patch: AutomationUpdateInput };
-      validateAutomationPatch(patch);
-      const automation = await updateAutomation(id, patch);
-      if (!automation) return { ok: false, error: 'automation_not_found' };
-      const refreshed = await refreshAutomationNextRunAt(id);
-      await broadcastAutomationUpdate(context.tabId);
-      return refreshed ?? automation;
-    }
-
-    case 'SET_AUTOMATION_STATUS': {
-      const { id, status } = message.payload as { id: string; status: AutomationStatus };
-      if (!isAutomationStatus(status)) return { ok: false, error: 'invalid_automation_status' };
-      const automation = await setAutomationStatus(id, status);
-      if (!automation) return { ok: false, error: 'automation_not_found' };
-      const refreshed = await refreshAutomationNextRunAt(id);
-      await broadcastAutomationUpdate(context.tabId);
-      return refreshed ?? automation;
-    }
-
-    case 'DELETE_AUTOMATION': {
-      const { id } = message.payload as { id: string };
-      cancelActiveAutomationRun(id);
-      await deleteAutomation(id);
-      await broadcastAutomationUpdate(context.tabId);
-      await broadcastAutomationRunsUpdate(context.tabId);
-      return { ok: true };
-    }
-
-    case 'RUN_AUTOMATION_NOW': {
-      const { id } = message.payload as { id: string };
-      return runAutomationNow(id, context.tabId);
-    }
-
-    case 'SCENARIOS_UPDATED':
-      await createContextMenus();
-      return { ok: true };
-
-    default:
-      throw new Error(`Legacy runtime command owner is missing: ${message.type}`);
-  }
 }
 
 async function executeLocalSkillImporterToolCall(call: ToolCall): Promise<ToolResult> {
@@ -1045,16 +915,10 @@ async function loadOrRefreshClientHeaders(preferredTabId?: number): Promise<Reco
 
 async function refreshClientHeadersFromDeepSeekTabs(preferredTabId?: number): Promise<boolean> {
   const tabs = await getDeepSeekTabsForAuthRefresh(preferredTabId);
-  for (const tab of tabs) {
-    if (!tab.id) continue;
-    try {
-      const response = await chrome.tabs.sendMessage(tab.id, REFRESH_AUTH_MESSAGE);
-      if (response?.hasToken === true) return true;
-    } catch {
-      // Content scripts may be absent on stale or restricted tabs; try the next live DeepSeek tab.
-    }
-  }
-  return false;
+  return refreshDeepSeekAuthFromTabs(tabs, {
+    sendMessage: (tabId) => chrome.tabs.sendMessage(tabId, REFRESH_AUTH_MESSAGE),
+    reportError: reportBackgroundStartupError,
+  });
 }
 
 async function getDeepSeekTabsForAuthRefresh(preferredTabId?: number): Promise<chrome.tabs.Tab[]> {
@@ -1226,9 +1090,9 @@ async function getChatAuthStatus(preferredTabId?: number) {
   const hasApiKey = await hasDeepSeekApiKey();
   if (hasApiKey) {
     return {
-      ok: true,
+      ok: true as const,
       available: true,
-      provider: 'official-api',
+      provider: 'official-api' as const,
       hasApiKey: true,
       hasToken: false,
     };
@@ -1236,9 +1100,9 @@ async function getChatAuthStatus(preferredTabId?: number) {
 
   const headers = await loadOrRefreshClientHeaders(preferredTabId);
   return {
-    ok: true,
+    ok: true as const,
     available: !!headers,
-    provider: headers ? 'deepseek-web' : null,
+    provider: headers ? 'deepseek-web' as const : null,
     hasApiKey: false,
     hasToken: !!headers,
   };
@@ -1246,7 +1110,8 @@ async function getChatAuthStatus(preferredTabId?: number) {
 
 async function broadcastChatAuthStatus(preferredTabId?: number) {
   const status = await getChatAuthStatus(preferredTabId);
-  chrome.runtime.sendMessage({ type: 'AUTH_STATUS_CHANGED', ...status }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'AUTH_STATUS_CHANGED', ...status })
+    .catch((error) => reportBackgroundStartupError('chat_auth_notification_failed', error));
 }
 
 async function broadcastConversationExportProgress(
@@ -1267,198 +1132,6 @@ async function executeBackgroundRuntimeToolCall(
     currentBackgroundLocale,
     options,
   );
-}
-
-async function analyzeMultimodalMedia(
-  request: MultimodalMediaAnalyzeRequest,
-): Promise<MultimodalMediaAnalyzeResponse> {
-  try {
-    const prompt = typeof request.prompt === 'string' && request.prompt.trim()
-      ? request.prompt.trim()
-      : 'Analyze the attached media.';
-    const media = normalizeMultimodalMediaInputs(request.media);
-    const server = await getMultimodalMcpServerForAnalysis();
-    const analyses: MultimodalMediaAnalysisItem[] = [];
-
-    const images = media.filter((item) => item.kind === 'image');
-    if (images.length > 0) {
-      const result = await executeBackgroundRuntimeToolCall(
-        createMultimodalMcpToolCall(server, 'analyze_images', {
-          prompt,
-          images: images.map((item, index) => {
-            if (!item.dataUrl) throw new Error(`${item.name} is missing image data.`);
-            return {
-              type: 'input_image',
-              image_url: item.dataUrl,
-              detail: 'auto',
-              label: item.name || `image-${index + 1}`,
-            };
-          }),
-          output_schema: 'general',
-        }, request),
-        'manual_chat',
-        { timeoutMs: MULTIMODAL_MCP_REQUEST_TIMEOUT_MS },
-      );
-      const analysis = createMultimodalAnalysisItem(
-        `images:${images.map((item) => item.id).join(',')}`,
-        'image',
-        images,
-        result,
-      );
-      if (!result.ok) {
-        return {
-          ok: false,
-          analyses: [analysis],
-          error: result.detail || result.summary,
-        };
-      }
-      analyses.push(analysis);
-    }
-
-    for (const video of media.filter((item) => item.kind === 'video')) {
-      if (!video.base64Data) throw new Error(`${video.name} is missing video data.`);
-      const result = await executeBackgroundRuntimeToolCall(
-        createMultimodalMcpToolCall(server, 'analyze_video', {
-          prompt,
-          video: {
-            inlineData: {
-              data: video.base64Data,
-              mimeType: video.mimeType,
-            },
-            mimeType: video.mimeType,
-          },
-          output_schema: 'summary',
-        }, request),
-        'manual_chat',
-        { timeoutMs: MULTIMODAL_MCP_REQUEST_TIMEOUT_MS },
-      );
-      const analysis = createMultimodalAnalysisItem(video.id, 'video', [video], result);
-      if (!result.ok) {
-        return {
-          ok: false,
-          analyses: [...analyses, analysis],
-          error: result.detail || result.summary,
-        };
-      }
-      analyses.push(analysis);
-    }
-
-    return { ok: true, analyses };
-  } catch (error) {
-    return {
-      ok: false,
-      analyses: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function normalizeMultimodalMediaInputs(value: unknown): MultimodalMediaInput[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error('No multimodal media was provided.');
-  }
-  if (value.length > MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN) {
-    throw new Error(`Attach at most ${MULTIMODAL_MEDIA_MAX_ITEMS_PER_TURN} media files per turn.`);
-  }
-
-  return value.map((item, index) => {
-    if (!item || typeof item !== 'object') throw new Error(`media[${index}] must be an object.`);
-    const media = item as Partial<MultimodalMediaInput>;
-    const normalized: MultimodalMediaInput = {
-      id: nonEmptyString(media.id, `media[${index}].id`),
-      kind: media.kind === 'image' || media.kind === 'video' ? media.kind : invalidMediaKind(index),
-      name: nonEmptyString(media.name, `media[${index}].name`),
-      mimeType: nonEmptyString(media.mimeType, `media[${index}].mimeType`),
-      sizeBytes: finiteNonNegativeNumber(media.sizeBytes, `media[${index}].sizeBytes`),
-      dataUrl: typeof media.dataUrl === 'string' && media.dataUrl ? media.dataUrl : undefined,
-      base64Data: typeof media.base64Data === 'string' && media.base64Data ? media.base64Data : undefined,
-    };
-    assertSupportedMultimodalMedia(normalized);
-    return normalized;
-  });
-}
-
-async function getMultimodalMcpServerForAnalysis() {
-  const servers = await getAllMcpServers({ includeSecrets: false });
-  const server = servers.find(isMultimodalMcpServer);
-  if (!server) {
-    throw new Error('Multimodal MCP preset is missing. Create it on the MCP page first.');
-  }
-  if (!server.enabled) {
-    throw new Error('Multimodal MCP server is disabled. Enable it on the MCP page first.');
-  }
-  if (!server.execution.enabled || server.execution.mode === 'disabled') {
-    throw new Error('Multimodal MCP execution is disabled. Enable execution on the MCP page first.');
-  }
-  if (!isMultimodalAnalysisToolAllowed(server.allowlist)) {
-    throw new Error('Multimodal MCP analysis tools are disabled. Enable analyze_images or analyze_video on the MCP page first.');
-  }
-  if (!canUseMultimodalMediaInput(server)) {
-    throw new Error('Multimodal MCP is not available for media analysis.');
-  }
-  return server;
-}
-
-function createMultimodalMcpToolCall(
-  server: Awaited<ReturnType<typeof getMultimodalMcpServerForAnalysis>>,
-  name: 'analyze_images' | 'analyze_video',
-  payload: Record<string, unknown>,
-  request: MultimodalMediaAnalyzeRequest,
-): ToolCall {
-  return {
-    name,
-    payload,
-    raw: '',
-    provider: {
-      kind: 'mcp',
-      id: server.id,
-      displayName: server.displayName,
-      transport: server.transport.kind,
-    },
-    source: {
-      trigger: 'manual_chat',
-      chatSessionId: request.chatSessionId ?? null,
-      parentMessageId: request.parentMessageId ?? null,
-    },
-  };
-}
-
-function createMultimodalAnalysisItem(
-  id: string,
-  kind: 'image' | 'video',
-  media: readonly MultimodalMediaInput[],
-  result: ToolResult,
-): MultimodalMediaAnalysisItem {
-  return {
-    id,
-    kind,
-    media: media.map((item) => ({
-      id: item.id,
-      kind: item.kind,
-      name: item.name,
-      mimeType: item.mimeType,
-      sizeBytes: item.sizeBytes,
-    })),
-    result,
-  };
-}
-
-function nonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${label} must be a non-empty string.`);
-  }
-  return value.trim();
-}
-
-function finiteNonNegativeNumber(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative number.`);
-  }
-  return value;
-}
-
-function invalidMediaKind(index: number): never {
-  throw new Error(`media[${index}].kind must be image or video.`);
 }
 
 async function runBrowserSandboxToolResult(request: SandboxRunRequest): Promise<ToolResult> {
@@ -1533,7 +1206,11 @@ function sendSandboxRunToOffscreen(request: SandboxRunRequest): Promise<SandboxE
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      try { port.disconnect(); } catch {}
+      try {
+        port.disconnect();
+      } catch (error) {
+        reportBackgroundStartupError('offscreen_port_disconnect_cleanup_failed', error);
+      }
       resolve(result);
     };
     const timeout = setTimeout(() => {
@@ -1590,85 +1267,6 @@ function sandboxExecutionResultToJson(result: SandboxExecutionResult): Record<st
   };
 }
 
-async function handleConversationExport(
-  payload: unknown,
-  excludeTabId?: number,
-): Promise<ConversationExportResult | { ok: false; exportId?: string; error: string }> {
-  const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-  const exportId = typeof value.exportId === 'string' && value.exportId.trim()
-    ? value.exportId.trim()
-    : crypto.randomUUID();
-  const request = normalizeConversationExportRequest(value.request);
-  const headers = await loadOrRefreshClientHeaders(excludeTabId);
-  if (!headers) {
-    return {
-      ok: false,
-      exportId,
-      error: backgroundT('background.auth.missingDeepSeek'),
-    };
-  }
-
-  const controller = new AbortController();
-  conversationExportControllers.set(exportId, controller);
-
-  try {
-    const baseUrl = new URL(DEEPSEEK_HOME_URL).origin;
-    const exportData = await runConversationExport({
-      exportId,
-      request,
-      baseUrl,
-      extensionVersion: getExtensionVersion(),
-      signal: controller.signal,
-      transport: createDeepSeekConversationExportTransport({
-        baseUrl,
-        clientHeaders: headers,
-        fetchImpl: fetch,
-      }),
-      onProgress: (progress) => broadcastConversationExportProgress(progress, excludeTabId),
-    });
-
-    await broadcastConversationExportProgress({
-      exportId,
-      phase: 'formatting',
-      status: 'running',
-      current: 0,
-      total: request.formats.length,
-      message: backgroundT('background.export.generating'),
-    }, excludeTabId);
-
-    assertConversationExportNotCancelled(controller.signal);
-    const artifacts = await buildConversationExportArtifactsCancellable(exportData, controller.signal);
-    assertConversationExportNotCancelled(controller.signal);
-    return {
-      ok: true,
-      exportId,
-      summary: exportData.stats,
-      artifacts,
-    };
-  } catch (error) {
-    const aborted = error instanceof DOMException && error.name === 'AbortError';
-    await broadcastConversationExportProgress({
-      exportId,
-      phase: aborted ? 'cancelled' : 'failed',
-      status: aborted ? 'cancelled' : 'failed',
-      current: 0,
-      total: 0,
-      message: aborted ? backgroundT('background.export.cancelled') : error instanceof Error ? error.message : String(error),
-    }, excludeTabId);
-    return {
-      ok: false,
-      exportId,
-      error: aborted ? backgroundT('background.export.cancelled') : error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    conversationExportControllers.delete(exportId);
-  }
-}
-
-function assertConversationExportNotCancelled(signal: AbortSignal) {
-  if (signal.aborted) throw new DOMException('Conversation export was cancelled.', 'AbortError');
-}
-
 async function scanDueAutomationsFromWake() {
   const result = await scanDueAutomations(executeAutomationWithContext);
   if (result.initialized > 0 || result.started > 0 || result.failed > 0) {
@@ -1683,7 +1281,7 @@ async function scanDueAutomationsFromWake() {
 
 async function runAutomationNow(id: string, excludeTabId?: number) {
   const automation = await getAutomationById(id);
-  if (!automation) return { ok: false, error: 'automation_not_found' };
+  if (!automation) return { ok: false as const, error: 'automation_not_found' };
 
   const run = await runAutomation({
     automationId: id,
@@ -1696,7 +1294,7 @@ async function runAutomationNow(id: string, excludeTabId?: number) {
   await broadcastAutomationRunsUpdate(excludeTabId);
   await broadcastToolCallHistoryUpdate(excludeTabId);
 
-  return run ?? { ok: false, error: 'automation_already_running' };
+  return run ?? { ok: false as const, error: 'automation_already_running' };
 }
 
 async function executeAutomationWithContext(
@@ -1757,83 +1355,6 @@ async function executeAutomationWithContext(
   });
 }
 
-function validateAutomationInput(input: AutomationCreateInput) {
-  if (!input || typeof input !== 'object') throw new Error('Invalid automation input');
-  validateNonEmptyString(input.name, 'Automation name');
-  validateNonEmptyString(input.prompt, 'Automation prompt');
-  validateAutomationScheduleInput(input.schedule);
-}
-
-function validateAutomationPatch(patch: AutomationUpdateInput) {
-  if (!patch || typeof patch !== 'object') throw new Error('Invalid automation patch');
-  if (patch.name !== undefined) validateNonEmptyString(patch.name, 'Automation name');
-  if (patch.prompt !== undefined) validateNonEmptyString(patch.prompt, 'Automation prompt');
-  if (patch.status !== undefined && !isAutomationStatus(patch.status)) {
-    throw new Error('Invalid automation status');
-  }
-  if (patch.schedule !== undefined) validateAutomationScheduleInput(patch.schedule);
-}
-
-function validateAutomationScheduleInput(schedule: AutomationCreateInput['schedule']) {
-  if (!schedule || typeof schedule !== 'object') throw new Error('Invalid automation schedule');
-  const result = validateAutomationSchedule(schedule);
-  if (!result.ok) throw new Error(result.error.message);
-}
-
-function validateNonEmptyString(value: unknown, label: string) {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${label} is required`);
-  }
-}
-
-function isAutomationStatus(status: unknown): status is AutomationStatus {
-  return status === 'active' || status === 'paused' || status === 'archived';
-}
-
-async function handleSyncCommand<T>(operation: () => Promise<T>): Promise<T | ReturnType<typeof createSyncCommandErrorResponse>> {
-  try {
-    return await operation();
-  } catch (error) {
-    const response = createSyncCommandErrorResponse(error);
-    if (response) return response;
-    throw error;
-  }
-}
-
-async function testSyncTarget(config: SyncConfig): Promise<void> {
-  await createStorageBackend(config, backgroundT).test();
-}
-
-async function authorizeSyncTarget(config: VersionedOAuthSyncConfig): Promise<string> {
-  // chrome.identity.launchWebAuthFlow is available only in the extension
-  // background context; the coordinator keeps this target immutable in queue.
-  if (config.provider === 'gdrive') return authorizeGDrive(config, backgroundT);
-  return authorizeOneDrive(config, backgroundT);
-}
-
-async function uploadLocalSyncTarget(config: SyncConfig): Promise<SyncCounts> {
-  const backend = createStorageBackend(config, backgroundT);
-  const [, snapshot] = await Promise.all([
-    backend.ensureStore(),
-    getLocalSyncDataSnapshot(),
-  ]);
-  await uploadSyncDataSnapshot(backend, snapshot);
-  return getSyncCounts(snapshot);
-}
-
-async function downloadRemoteSyncTarget(config: SyncConfig): Promise<SyncDownloadResult> {
-  const backend = createStorageBackend(config, backgroundT);
-  const remoteSnapshot = await getRemoteSyncDataSnapshot(backend);
-  const snapshot = await beginSyncLocalApply(
-    () => mergeSyncSnapshotWithLocalImports(remoteSnapshot),
-  );
-  return {
-    counts: getSyncCounts(snapshot),
-    projectContextChanged: snapshot.projectContext !== null,
-    savedItemsChanged: snapshot.savedItems !== null,
-  };
-}
-
 async function notifyDownloadedSyncState(
   result: SyncDownloadResult,
   context: RuntimeMessageContext,
@@ -1843,335 +1364,7 @@ async function notifyDownloadedSyncState(
   if (result.savedItemsChanged) await broadcastSavedItemsUpdate(context.tabId);
 }
 
-async function getLocalSyncDataSnapshot(): Promise<SyncDataSnapshot> {
-  return withSyncLocalStateLock(async () => {
-    const [memories, userSkills, skillSources, presets, projectContext, savedItems] = await Promise.all([
-      getAllMemoriesAlreadyLocked(),
-      getUserSkillsAlreadyLocked(),
-      getAllSkillSourcesAlreadyLocked(),
-      getAllPresetsAlreadyLocked(),
-      getProjectContextStateAlreadyLocked(),
-      getSavedItemsStateAlreadyLocked(),
-    ]);
-
-    return {
-      memories: memories.map(({ id, ...memory }) => memory),
-      skills: userSkills.filter(isSyncableSkill),
-      skillSources: skillSources.filter(isSyncableSkillSource),
-      presets,
-      projectContext,
-      savedItems,
-    };
-  });
-}
-
-async function uploadSyncDataSnapshot(backend: StorageBackend, snapshot: SyncDataSnapshot): Promise<void> {
-  await uploadSyncGeneration(backend, serializeSyncDataSnapshot(snapshot));
-}
-
-async function getRemoteSyncDataSnapshot(backend: StorageBackend): Promise<SyncDataSnapshot> {
-  const generationFiles = await readCurrentSyncGeneration(backend);
-  const remoteFiles = generationFiles ?? await getLegacyRemoteSyncFiles(backend);
-  return parseRemoteSyncDataSnapshot(remoteFiles);
-}
-
-async function getLegacyRemoteSyncFiles(backend: StorageBackend): Promise<ReadonlyMap<SyncFileKey, string>> {
-  const [requiredFiles, optionalFiles] = await Promise.all([
-    Promise.all(REQUIRED_SYNC_FILE_KEYS.map((file) => backendGetRequired(backend, file))),
-    Promise.all(OPTIONAL_SYNC_FILE_KEYS.map((file) => backend.get(file))),
-  ]);
-  const entries: [SyncFileKey, string][] = REQUIRED_SYNC_FILE_KEYS.map(
-    (file, index) => [file, requiredFiles[index]],
-  );
-  OPTIONAL_SYNC_FILE_KEYS.forEach((file, index) => {
-    const content = optionalFiles[index];
-    if (content !== null) entries.push([file, content]);
-  });
-  return new Map(entries);
-}
-
-function parseRemoteSyncDataSnapshot(remoteFiles: ReadonlyMap<SyncFileKey, string>): SyncDataSnapshot {
-  const remoteMemJson = getRequiredSyncFile(remoteFiles, SYNC_FILE_KEYS.memories);
-  const remoteSkillJson = getRequiredSyncFile(remoteFiles, SYNC_FILE_KEYS.skills);
-  const remotePresetJson = getRequiredSyncFile(remoteFiles, SYNC_FILE_KEYS.presets);
-  const remoteSkillSourceJson = remoteFiles.get(SYNC_FILE_KEYS.skillSources) ?? null;
-  const remoteProjectContextJson = remoteFiles.get(SYNC_FILE_KEYS.projectContext) ?? null;
-  const remoteSavedItemsJson = remoteFiles.get(SYNC_FILE_KEYS.savedItems) ?? null;
-
-  const memories = parseValidatedArray(SYNC_FILE_KEYS.memories, remoteMemJson, validateSyncMemory);
-
-  const skills = parseValidatedJson(
-    SYNC_FILE_KEYS.skills,
-    remoteSkillJson,
-    decodeUserSkillCollection,
-  )
-    .filter(isSyncableSkill);
-  const skillSources = remoteSkillSourceJson === null
-    ? []
-    : parseValidatedJson(
-      SYNC_FILE_KEYS.skillSources,
-      remoteSkillSourceJson,
-      decodeSkillSourceCollection,
-    )
-      .filter(isSyncableSkillSource);
-
-  return {
-    memories,
-    skills,
-    skillSources,
-    presets: parseValidatedJson(
-      SYNC_FILE_KEYS.presets,
-      remotePresetJson,
-      decodePresetCollection,
-    ),
-    projectContext: remoteProjectContextJson === null
-      ? null
-      : parseValidatedJson(SYNC_FILE_KEYS.projectContext, remoteProjectContextJson, decodeProjectContextState),
-    savedItems: remoteSavedItemsJson === null
-      ? null
-      : parseValidatedJson(SYNC_FILE_KEYS.savedItems, remoteSavedItemsJson, decodeSavedItemsState),
-  };
-}
-
-function getRequiredSyncFile(files: ReadonlyMap<SyncFileKey, string>, file: SyncFileKey): string {
-  const content = files.get(file);
-  if (content === undefined) {
-    throw new Error(backgroundT('background.sync.missingRemoteFile', { file }));
-  }
-  return content;
-}
-
-async function mergeSyncSnapshotWithLocalImports(snapshot: SyncDataSnapshot): Promise<SyncDataSnapshot> {
-  const [userSkills, skillSources] = await Promise.all([
-    getUserSkillsAlreadyLocked(),
-    getAllSkillSourcesAlreadyLocked(),
-  ]);
-  const merged = mergeLocalSkillImportsIntoSyncSnapshot(
-    {
-      skills: snapshot.skills,
-      skillSources: snapshot.skillSources,
-    },
-    {
-      skills: userSkills,
-      skillSources,
-    },
-  );
-  return {
-    ...snapshot,
-    skills: merged.skills,
-    skillSources: merged.skillSources,
-  };
-}
-
-async function backendGetRequired(backend: StorageBackend, file: string): Promise<string> {
-  const content = await backend.get(file);
-  if (content === null) {
-    throw new Error(backgroundT('background.sync.missingRemoteFile', { file }));
-  }
-  return content;
-}
-
-function getSyncCounts(snapshot: SyncDataSnapshot): SyncCounts {
-  return {
-    memories: snapshot.memories.length,
-    skills: snapshot.skills.length,
-    presets: snapshot.presets.length,
-    projects: snapshot.projectContext?.projects.length ?? 0,
-    projectConversations: snapshot.projectContext?.conversations.length ?? 0,
-    savedItems: snapshot.savedItems?.items.length ?? 0,
-  };
-}
-
-interface DeepSeekImageUploadRequest {
-  dataUrl: string;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-}
-
-async function handleDeepSeekImageUpload(payload: unknown, excludeTabId?: number) {
-  if (!(await getChatEnabled())) {
-    return { ok: false, error: 'chat_disabled' };
-  }
-
-  const request = normalizeDeepSeekImageUploadRequest(payload);
-  const headers = await loadOrRefreshClientHeaders(excludeTabId);
-  if (!headers) {
-    return { ok: false, error: backgroundT('background.auth.missingDeepSeek') };
-  }
-
-  const file = dataUrlToBlob(request.dataUrl, request.mimeType);
-  if (file.size !== request.sizeBytes) {
-    throw new Error('Image upload payload size changed during transfer.');
-  }
-
-  const uploaded = await uploadDeepSeekFile({
-    file,
-    filename: request.name,
-    modelType: 'vision',
-    clientHeaders: headers,
-    powHeaders: await createPowHeadersForPath(headers, DEEPSEEK_FILE_UPLOAD_PATH),
-  });
-
-  return { ok: true, file: uploaded };
-}
-
-function normalizeDeepSeekImageUploadRequest(payload: unknown): DeepSeekImageUploadRequest {
-  const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-  const dataUrl = typeof value.dataUrl === 'string' ? value.dataUrl : '';
-  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : 'image';
-  const mimeType = typeof value.mimeType === 'string' && value.mimeType.trim()
-    ? value.mimeType.trim()
-    : typeof value.type === 'string' && value.type.trim()
-      ? value.type.trim()
-      : '';
-  const sizeBytes = typeof value.sizeBytes === 'number' && Number.isFinite(value.sizeBytes)
-    ? value.sizeBytes
-    : typeof value.size === 'number' && Number.isFinite(value.size)
-      ? value.size
-      : 0;
-
-  if (!dataUrl.startsWith('data:')) {
-    throw new Error('Image upload payload must include a data URL.');
-  }
-  if (!mimeType.startsWith('image/')) {
-    throw new Error(`${name} is not an image file.`);
-  }
-  if (sizeBytes <= 0) {
-    throw new Error(`${name} is empty.`);
-  }
-  if (sizeBytes > DEEPSEEK_IMAGE_UPLOAD_MAX_BYTES) {
-    throw new Error(`${name} exceeds the ${formatUploadBytes(DEEPSEEK_IMAGE_UPLOAD_MAX_BYTES)} image upload limit.`);
-  }
-
-  return { dataUrl, name, mimeType, sizeBytes };
-}
-
-function dataUrlToBlob(dataUrl: string, expectedMimeType: string): Blob {
-  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl);
-  if (!match) {
-    throw new Error('Image upload payload must be base64 encoded.');
-  }
-
-  const mimeType = match[1] || expectedMimeType;
-  if (mimeType !== expectedMimeType) {
-    throw new Error(`Image MIME type changed from ${expectedMimeType} to ${mimeType}.`);
-  }
-
-  const binary = atob(match[2]);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType });
-}
-
-function coerceRefFileIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function formatUploadBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)}MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
-  return `${bytes}B`;
-}
-
-async function handleChatSubmitPrompt(
-  prompt: string,
-  configInput?: Partial<OfficialApiChatConfig>,
-  refFileIds: string[] = [],
-  excludeTabId?: number,
-) {
-  const apiKey = await getDeepSeekApiKey();
-  const provider: ChatLoopProvider = apiKey ? 'official-api' : 'web';
-  await markChatLoopStarted(provider);
-  try {
-    if (apiKey) {
-      const config = configInput
-        ? normalizeOfficialApiChatConfig(configInput)
-        : await getOfficialApiChatConfig();
-      await handleOfficialApiChatSubmitPrompt(prompt, apiKey, config, excludeTabId);
-      return;
-    }
-
-    await handleWebChatSubmitPrompt(prompt, refFileIds, excludeTabId);
-  } finally {
-    await markChatLoopFinished();
-  }
-}
-
-async function handleWebChatSubmitPrompt(prompt: string, refFileIds: string[] = [], excludeTabId?: number) {
-  const headers = await loadOrRefreshClientHeaders(excludeTabId);
-  if (!headers) {
-    broadcastChatChunk({ text: '', done: true, error: backgroundT('background.auth.missingDeepSeek') }, excludeTabId);
-    return;
-  }
-
-  try {
-    if (!chatSessionId) {
-      chatSessionId = await createChatSession(headers);
-      chatParentMessageId = null;
-    }
-
-    const { augmented, enabledDescriptors } = await buildSidepanelPrompt(prompt);
-    const storedModelType = await getModelType();
-    const modelType = refFileIds.length > 0 ? 'vision' : storedModelType;
-
-    const initialInput = {
-      chatSessionId,
-      parentMessageId: chatParentMessageId,
-      modelType,
-      prompt: augmented,
-      refFileIds,
-      thinkingEnabled: false,
-      searchEnabled: false,
-      clientHeaders: headers,
-    };
-
-    await runSidepanelToolLoop(initialInput, enabledDescriptors, excludeTabId);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    broadcastChatChunk({ text: '', done: true, error: msg }, excludeTabId);
-    if (msg.includes('auth') || msg.includes('token') || msg.includes('401')) {
-      chatSessionId = null;
-    }
-  }
-}
-
-async function handleOfficialApiChatSubmitPrompt(
-  prompt: string,
-  apiKey: string,
-  config: OfficialApiChatConfig,
-  excludeTabId?: number,
-) {
-  try {
-    const promptContext = await buildSidepanelPrompt(prompt);
-
-    const initialMessages: OfficialDeepSeekMessage[] = [
-      ...officialApiChatMessages,
-      { role: 'user', content: promptContext.augmented },
-    ];
-
-    officialApiChatMessages = await runOfficialApiToolLoop(
-      {
-        apiKey,
-        config,
-        messages: initialMessages,
-      },
-      promptContext.enabledDescriptors,
-      excludeTabId,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    broadcastChatChunk({ text: '', done: true, error: msg }, excludeTabId);
-  }
-}
-
-async function buildSidepanelPrompt(prompt: string): Promise<{
+async function buildSidepanelPrompt(request: ChatPromptBuildRequest): Promise<{
   augmented: string;
   enabledDescriptors: ToolDescriptor[];
 }> {
@@ -2183,13 +1376,13 @@ async function buildSidepanelPrompt(prompt: string): Promise<{
   const promptSettings = await getPromptInjectionSettings();
   const shouldInjectPreset = shouldInjectPresetForTurn({
     hasActivePreset: Boolean(activePreset),
-    isFirstMessage: chatSessionId === null && officialApiChatMessages.length === 0,
-    messageCount: officialApiChatMessages.length + 1,
+    isFirstMessage: request.isFirstMessage,
+    messageCount: request.messageCount,
     cadence: promptSettings.presetCadence,
   });
 
   const enabledDescriptors = filterSidepanelChatToolDescriptors(toolDescriptors);
-  const { augmented } = buildPromptAugmentation(prompt, {
+  const { augmented } = buildPromptAugmentation(request.prompt, {
     memories: memories.filter((memory) => memory.scope !== 'project'),
     presetContent: shouldInjectPreset ? activePreset?.content ?? null : null,
     toolDescriptors: enabledDescriptors,
@@ -2203,171 +1396,6 @@ async function buildSidepanelPrompt(prompt: string): Promise<{
   return { augmented, enabledDescriptors };
 }
 
-async function runOfficialApiToolLoop(
-  input: {
-    apiKey: string;
-    config: OfficialApiChatConfig;
-    messages: OfficialDeepSeekMessage[];
-  },
-  toolDescriptors: ToolDescriptor[],
-  excludeTabId?: number,
-): Promise<OfficialDeepSeekMessage[]> {
-  const MAX_STEPS = 20;
-  let currentMessages = [...input.messages];
-
-  for (let step = 0; step < MAX_STEPS; step++) {
-    let accumulated = '';
-    let reasoningAccumulated = '';
-    const turn = await submitOfficialDeepSeekStreaming({
-      apiKey: input.apiKey,
-      config: input.config,
-      messages: currentMessages,
-    }, {
-      onTextChunk(newText: string, fullText: string) {
-        accumulated = fullText;
-        broadcastChatChunk({ text: newText, done: false, phase: 'answer' }, excludeTabId);
-      },
-      onReasoningChunk(newText: string, fullText: string) {
-        reasoningAccumulated = fullText;
-        broadcastChatChunk({ text: '', reasoningText: newText, done: false, phase: 'reasoning' }, excludeTabId);
-      },
-    });
-
-    const fullText = accumulated || turn.assistantText;
-
-    if (!fullText) {
-      broadcastChatChunk({ text: '', done: true }, excludeTabId);
-      return currentMessages;
-    }
-
-    currentMessages = [
-      ...currentMessages,
-      {
-        role: 'assistant',
-        content: fullText,
-        reasoningContent: reasoningAccumulated || turn.reasoningText || undefined,
-      },
-    ];
-    const toolCalls = extractToolCalls(fullText, { descriptors: toolDescriptors });
-
-    if (toolCalls.length === 0) {
-      broadcastChatChunk({ text: '', done: true }, excludeTabId);
-      return currentMessages;
-    }
-
-    const execs: ToolExecutionRecord[] = [];
-    for (const call of toolCalls) {
-      const result = await executeBackgroundRuntimeToolCall(call, 'sidepanel_chat');
-      execs.push({
-        name: call.name,
-        result: {
-          ok: result.ok,
-          summary: result.summary,
-          detail: result.detail,
-          output: result.output,
-          truncated: result.truncated,
-          error: result.error,
-        },
-      });
-    }
-
-    const toolResultsText = execs.map((e) =>
-      `<${e.name}_result>\n${JSON.stringify(e.result)}\n</${e.name}_result>`
-    ).join('\n');
-
-    currentMessages = [
-      ...currentMessages,
-      {
-        role: 'user',
-        content: backgroundT('background.chat.continueWithToolResults', { toolResults: toolResultsText }),
-      },
-    ];
-  }
-
-  broadcastChatChunk({ text: backgroundT('background.chat.maxToolSteps'), done: true }, excludeTabId);
-  return currentMessages;
-}
-
-async function runSidepanelToolLoop(
-  input: {
-    chatSessionId: string;
-    parentMessageId: number | null;
-    modelType: string | null;
-    prompt: string;
-    refFileIds: string[];
-    thinkingEnabled: boolean;
-    searchEnabled: boolean;
-    clientHeaders: Record<string, string>;
-  },
-  toolDescriptors: ToolDescriptor[],
-  excludeTabId?: number,
-) {
-  const MAX_STEPS = 20;
-  const allExecutions: ToolExecutionRecord[] = [];
-  let currentInput = input;
-
-  for (let step = 0; step < MAX_STEPS; step++) {
-    let accumulated = '';
-    const turn = await submitPromptStreaming({
-      ...currentInput,
-      powHeaders: await createPowHeaders(currentInput.clientHeaders),
-    }, {
-      onTextChunk(newText: string, fullText: string) {
-        accumulated = fullText;
-        broadcastChatChunk({ text: newText, done: false }, excludeTabId);
-      },
-    });
-
-    chatParentMessageId = turn.responseMessageId;
-    const fullText = accumulated || turn.assistantText;
-
-    if (!fullText) {
-      broadcastChatChunk({ text: '', done: true }, excludeTabId);
-      return;
-    }
-
-    const toolCalls = extractToolCalls(fullText, { descriptors: toolDescriptors });
-
-    if (toolCalls.length === 0) {
-      broadcastChatChunk({ text: fullText, done: true }, excludeTabId);
-      return;
-    }
-
-    const execs: ToolExecutionRecord[] = [];
-    for (const call of toolCalls) {
-      const result = await executeBackgroundRuntimeToolCall(call, 'sidepanel_chat');
-      execs.push({
-        name: call.name,
-        result: {
-          ok: result.ok,
-          summary: result.summary,
-          detail: result.detail,
-          output: result.output,
-          truncated: result.truncated,
-          error: result.error,
-        },
-      });
-    }
-    allExecutions.push(...execs);
-
-    const toolResultsText = execs.map((e) =>
-      `<${e.name}_result>\n${JSON.stringify(e.result)}\n</${e.name}_result>`
-    ).join('\n');
-
-    const continuationPrompt = backgroundT('background.chat.continueWithToolResults', {
-      toolResults: toolResultsText,
-    });
-
-    currentInput = {
-      ...currentInput,
-      prompt: continuationPrompt,
-      parentMessageId: chatParentMessageId,
-    };
-  }
-
-  broadcastChatChunk({ text: backgroundT('background.chat.maxToolSteps'), done: true }, excludeTabId);
-}
-
 function broadcastChatChunk(
   chunk: {
     text: string;
@@ -2378,18 +1406,6 @@ function broadcastChatChunk(
   },
   excludeTabId?: number,
 ) {
-  chrome.runtime.sendMessage({ type: 'CHAT_STREAM_CHUNK', ...chunk }).catch(() => {});
-}
-
-// Called on every service-worker wake. If a chat tool loop was running when
-// the previous SW instance was terminated, the sidepanel never received its
-// final `done:true` chunk. Emit one so the UI unblocks, then reset in-memory
-// chat state so the next turn starts clean.
-async function reconcileInterruptedChatLoopOnWake() {
-  const interrupted = await reconcileInterruptedChatLoop();
-  if (!interrupted) return;
-  chatSessionId = null;
-  chatParentMessageId = null;
-  officialApiChatMessages = [];
-  broadcastChatChunk({ text: '', done: true, error: backgroundT('background.chat.interrupted') });
+  chrome.runtime.sendMessage({ type: 'CHAT_STREAM_CHUNK', ...chunk })
+    .catch((error) => reportBackgroundStartupError('chat_stream_notification_failed', error));
 }

@@ -10,7 +10,6 @@ import {
 } from '../core/messaging/runtime-command-contracts';
 import {
   CLIENT_ONLY_RUNTIME_COMMAND_TYPES,
-  LEGACY_RUNTIME_COMMAND_TYPES,
   TYPED_RUNTIME_COMMAND_TYPES,
   createUnknownRuntimeCommandResponse,
   getRuntimeCommandOwner,
@@ -41,7 +40,6 @@ const CUTOVER_LEDGER_SECTIONS = [
 
 describe('runtime command compatibility contract', () => {
   it('matches the live router, MessageAction union, and checked-in human inventory', () => {
-    const legacyContracts = extractLegacyMessageContracts(backgroundSource);
     const typedContracts: RuntimeCaseContract[] = TYPED_RUNTIME_COMMAND_TYPES.map((type) => {
       const registered = RUNTIME_COMMAND_CONTRACTS[
         type as keyof typeof RUNTIME_COMMAND_CONTRACTS
@@ -54,7 +52,7 @@ describe('runtime command compatibility contract', () => {
         error: registered.error,
       };
     });
-    const liveContracts = [...legacyContracts, ...typedContracts];
+    const liveContracts = typedContracts;
     const live = liveContracts.map((contract) => contract.type);
     const declaredContracts = extractMessageActionContracts(typesSource);
     const declared = declaredContracts.map((contract) => contract.type);
@@ -75,7 +73,6 @@ describe('runtime command compatibility contract', () => {
     expectSortedEqual(declaredOnly, readInventoryList('Declared Only'));
     expectSortedEqual(registryLive, live);
     expectSortedEqual(registryDeclared, declared);
-    expectSortedEqual(legacyContracts.map((contract) => contract.type), LEGACY_RUNTIME_COMMAND_TYPES);
     expectSortedEqual(typedContracts.map((contract) => contract.type), TYPED_RUNTIME_COMMAND_TYPES);
     expectSortedEqual(declaredOnly, CLIENT_ONLY_RUNTIME_COMMAND_TYPES);
     const cutoverLedger = CUTOVER_LEDGER_SECTIONS.flatMap(([heading, count]) => {
@@ -163,11 +160,10 @@ describe('runtime command compatibility contract', () => {
       .toEqual(generic.response);
   });
 
-  it('characterizes the remaining payload-decoding gap and resolved routing behavior', () => {
-    expect(RUNTIME_CURRENT_GAPS.map((gap) => gap.target)).toEqual([
-      'decoded-command-contract-during-R4.3-R4.4',
-    ]);
-    expect(extractLegacyDefaultThrows(backgroundSource)).toBe(true);
+  it('closes the payload-decoding and legacy-router gaps', () => {
+    expect(RUNTIME_CURRENT_GAPS).toEqual([]);
+    expect(backgroundSource).not.toContain('handleLegacyMessage');
+    expect(backgroundSource).not.toContain('handleLegacy:');
     for (const resolved of RUNTIME_RESOLVED_ROUTING_CASES) {
       expect(resolved.target).toBe('explicit-rejection-at-R3.1-registry');
       expect(createUnknownRuntimeCommandResponse()).toEqual(resolved.response);
@@ -211,41 +207,6 @@ interface RuntimeCaseContract {
   error: RuntimeErrorFamily;
 }
 
-function extractLegacyMessageContracts(source: string): RuntimeCaseContract[] {
-  const sourceFile = ts.createSourceFile('background.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  let handleLegacyMessage: ts.FunctionDeclaration | undefined;
-
-  sourceFile.forEachChild((node) => {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === 'handleLegacyMessage') {
-      handleLegacyMessage = node;
-    }
-  });
-  if (!handleLegacyMessage?.body) throw new Error('handleLegacyMessage function not found');
-
-  const switchStatement = handleLegacyMessage.body.statements.find(ts.isSwitchStatement);
-  if (!switchStatement) throw new Error('handleLegacyMessage switch not found');
-
-  return switchStatement.caseBlock.clauses.flatMap((clause) => {
-    if (!ts.isCaseClause(clause) || !ts.isStringLiteral(clause.expression)) return [];
-    let readsPayload = false;
-    let directPayloadCast = false;
-    const inspect = (node: ts.Node) => {
-      if (isMessagePayloadAccess(node)) readsPayload = true;
-      if (ts.isAsExpression(node) && isMessagePayloadAccess(node.expression)) directPayloadCast = true;
-      ts.forEachChild(node, inspect);
-    };
-    clause.statements.forEach(inspect);
-    const type = clause.expression.text;
-    return [{
-      type,
-      readsPayload,
-      directPayloadCast,
-      requestAccess: readsPayload ? directPayloadCast ? 'payload-cast' : 'payload-delegated' : 'none',
-      error: type === 'EXECUTE_TOOL_CALL' ? 'tool-error' : 'background-error',
-    }];
-  });
-}
-
 interface MessageActionContract {
   type: string;
   payloadPresence: RuntimePayloadPresence;
@@ -281,29 +242,6 @@ function extractMessageActionContracts(source: string): MessageActionContract[] 
       payloadPresence: payloadProperty ? payloadProperty.questionToken ? 'optional' : 'required' : 'none',
     };
   });
-}
-
-function extractLegacyDefaultThrows(source: string): boolean {
-  const sourceFile = ts.createSourceFile('background.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  let throws = false;
-  const inspect = (node: ts.Node) => {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === 'handleLegacyMessage' && node.body) {
-      const switchStatement = node.body.statements.find(ts.isSwitchStatement);
-      const defaultClause = switchStatement?.caseBlock.clauses.find(ts.isDefaultClause);
-      throws = Boolean(defaultClause?.statements.some(ts.isThrowStatement));
-      return;
-    }
-    ts.forEachChild(node, inspect);
-  };
-  inspect(sourceFile);
-  return throws;
-}
-
-function isMessagePayloadAccess(node: ts.Node): node is ts.PropertyAccessExpression {
-  return ts.isPropertyAccessExpression(node) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === 'message' &&
-    node.name.text === 'payload';
 }
 
 function readInventoryList(heading: string, level = 2): string[] {

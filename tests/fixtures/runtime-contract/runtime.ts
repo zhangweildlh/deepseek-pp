@@ -4,11 +4,11 @@ export const RUNTIME_TOPOLOGY = {
   shared: 89,
   liveOnly: 32,
   declaredOnly: 2,
-  readsPayload: 79,
-  ignoresPayload: 42,
-  directPayloadCasts: 12,
-  decodedPayloads: 58,
-  delegatedPayloads: 9,
+  readsPayload: 80,
+  ignoresPayload: 41,
+  directPayloadCasts: 0,
+  decodedPayloads: 80,
+  delegatedPayloads: 0,
 } as const;
 
 export const RUNTIME_REQUEST_FIXTURES = [
@@ -158,13 +158,7 @@ export const RUNTIME_ERROR_FIXTURES = {
   },
 } as const;
 
-export const RUNTIME_CURRENT_GAPS = [
-  {
-    name: 'direct payload casts do not decode external input',
-    current: { type: 'SAVE_DEEPSEEK_API_KEY', payload: {} },
-    target: 'decoded-command-contract-during-R4.3-R4.4',
-  },
-] as const;
+export const RUNTIME_CURRENT_GAPS = [] as const;
 
 export const RUNTIME_RESOLVED_ROUTING_CASES = [
   {

@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 describe('whole-key persistence boundaries', () => {
   it('owns one independent queue per store instead of joining the sync-global lock', () => {
-    for (const path of [
-      'core/automation/store.ts',
-      'core/usage/store.ts',
-      'core/tool/history.ts',
-    ]) {
+    for (const [path, queueFactory] of [
+      ['core/automation/store.ts', 'createSerialOperationQueue'],
+      ['core/usage/store.ts', 'createCoalescingMutationQueue'],
+      ['core/tool/history.ts', 'createCoalescingMutationQueue'],
+    ] as const) {
       const source = readFileSync(path, 'utf8');
-      expect(source).toContain('createSerialOperationQueue');
+      expect(source).toContain(queueFactory);
       expect(source).not.toContain('withSyncLocalStateLock');
     }
   });
@@ -39,13 +39,24 @@ describe('whole-key persistence boundaries', () => {
       'entrypoints/sidepanel/components/settings/UsageSubPage.tsx',
       'utf8',
     );
+    const usageController = readFileSync(
+      'entrypoints/sidepanel/controllers/usage-controller.ts',
+      'utf8',
+    );
     const mcp = readFileSync('entrypoints/sidepanel/pages/McpPage.tsx', 'utf8');
+    const mcpController = readFileSync(
+      'entrypoints/sidepanel/controllers/mcp-tools-controller.ts',
+      'utf8',
+    );
 
     expect(automation).toContain('decodeAutomationList');
-    expect(automation).toContain('unwrapRuntimeResponse<unknown>');
-    expect(usage).toContain('unwrapRuntimeResponse<unknown>');
-    expect(usage).toContain('isUsageSummary(result)');
-    expect(mcp).toContain('unwrapRuntimeResponse<unknown>');
-    expect(mcp).toContain('decodeToolCallHistory(recent');
+    expect(automation).toContain('sidepanelRuntimeClient.request');
+    expect(automation).not.toContain('chrome.runtime.sendMessage');
+    expect(usage).toContain('usageController.getSummary');
+    expect(usageController).toContain('sidepanelRuntimeClient');
+    expect(usageController).toContain('isUsageSummary(value)');
+    expect(mcp).toContain('useMcpPageController');
+    expect(mcpController).toContain('sidepanelRuntimeClient');
+    expect(mcpController).toContain("decodeToolCallHistory(value, 'GET_TOOL_CALL_HISTORY response')");
   });
 });

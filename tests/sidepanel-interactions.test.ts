@@ -145,6 +145,81 @@ describe('sidepanel interactions', () => {
     expect(container.textContent).not.toContain('暂无保存项');
   });
 
+  it('retains the last valid saved item when an update payload is corrupt', async () => {
+    const item = {
+      id: 'saved-1',
+      syncId: 'sync-1',
+      kind: 'snippet',
+      title: 'Keep confirmed item',
+      content: 'Last confirmed content.',
+      tags: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const sendMessage = vi.fn(async (message: { type: string }) => (
+      message.type === 'GET_SAVED_ITEMS' ? [item] : null
+    ));
+    stubChrome(sendMessage);
+
+    await renderElement(React.createElement(SavedPage));
+    await flushPromises();
+    await act(async () => {
+      runtimeListeners.forEach((listener) => listener({
+        type: 'SAVED_ITEMS_UPDATED',
+        savedItems: [{ id: 'corrupt' }],
+      }));
+    });
+
+    expect(container.textContent).toContain('Keep confirmed item');
+    expect(container.textContent).toContain('savedItemsUpdate[0]');
+    expect(container.textContent).not.toContain('暂无保存项');
+  });
+
+  it('does not let an older saved-item read replace a newer update event', async () => {
+    let resolveInitialRead!: (value: unknown) => void;
+    const initialRead = new Promise<unknown>((resolve) => {
+      resolveInitialRead = resolve;
+    });
+    const sendMessage = vi.fn((message: { type: string }) => (
+      message.type === 'GET_SAVED_ITEMS' ? initialRead : Promise.resolve(null)
+    ));
+    stubChrome(sendMessage);
+    await renderElement(React.createElement(SavedPage));
+
+    await act(async () => {
+      runtimeListeners.forEach((listener) => listener({
+        type: 'SAVED_ITEMS_UPDATED',
+        savedItems: [{
+          id: 'saved-new',
+          syncId: 'sync-new',
+          kind: 'snippet',
+          title: 'Newer saved item',
+          content: 'Newer content.',
+          tags: [],
+          createdAt: 2,
+          updatedAt: 2,
+        }],
+      }));
+    });
+    expect(container.textContent).toContain('Newer saved item');
+
+    await act(async () => {
+      resolveInitialRead([{
+        id: 'saved-old',
+        syncId: 'sync-old',
+        kind: 'snippet',
+        title: 'Older saved item',
+        content: 'Older content.',
+        tags: [],
+        createdAt: 1,
+        updatedAt: 1,
+      }]);
+      await initialRead;
+    });
+    expect(container.textContent).toContain('Newer saved item');
+    expect(container.textContent).not.toContain('Older saved item');
+  });
+
   it('keeps a saved item visible when repository deletion fails', async () => {
     const item = {
       id: 'saved-1',
@@ -176,43 +251,43 @@ describe('sidepanel interactions', () => {
   });
 
   it('shows scenario repository failures instead of silently loading built-ins', async () => {
-    vi.stubGlobal('chrome', {
-      storage: {
-        local: {
-          get: vi.fn(async () => ({
-            scenarioConfigs: { schemaVersion: 2, items: [] },
-          })),
-          set: vi.fn(),
-        },
-      },
-      runtime: {
-        sendMessage: vi.fn(),
-      },
-    });
+    const sendMessage = vi.fn(async () => ({
+      ok: false,
+      error: 'scenarios.schemaVersion is not supported',
+    }));
+    stubChrome(sendMessage);
 
     await renderElement(React.createElement(ScenarioManager));
     await flushPromises();
 
     expect(container.textContent)
       .toContain('场景操作失败：scenarios.schemaVersion is not supported');
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'SCENARIOS_UPDATED',
+      payload: { operation: 'get' },
+    });
   });
 
   it('reports a committed Scenario separately when background menu refresh fails', async () => {
-    let scenarioConfigs: unknown;
-    const sendMessage = vi.fn(async () => ({ ok: false, error: 'menu offline' }));
-    vi.stubGlobal('chrome', {
-      storage: {
-        local: {
-          get: vi.fn(async () => (
-            scenarioConfigs === undefined ? {} : { scenarioConfigs }
-          )),
-          set: vi.fn(async (patch: { scenarioConfigs: unknown }) => {
-            scenarioConfigs = patch.scenarioConfigs;
-          }),
-        },
-      },
-      runtime: { sendMessage },
+    let scenarios = [{
+      id: 'summarize',
+      label: '总结',
+      template: '总结 {text}',
+      builtIn: true,
+      enabled: true,
+    }];
+    const sendMessage = vi.fn(async (message: {
+      type: string;
+      payload?: { operation?: string; scenario?: typeof scenarios[number] };
+    }) => {
+      if (message.payload?.operation === 'get') return { ok: true, scenarios };
+      if (message.payload?.operation === 'save' && message.payload.scenario) {
+        scenarios = [message.payload.scenario];
+        return { ok: false, error: 'menu offline' };
+      }
+      return null;
     });
+    stubChrome(sendMessage);
 
     await renderElement(React.createElement(ScenarioManager));
     await flushPromises();
@@ -221,8 +296,15 @@ describe('sidepanel interactions', () => {
     await act(async () => firstToggle?.click());
     await flushPromises();
 
-    expect((scenarioConfigs as Array<{ id: string; enabled: boolean }>)[0])
+    expect(scenarios[0])
       .toMatchObject({ id: 'summarize', enabled: false });
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'SCENARIOS_UPDATED',
+      payload: {
+        operation: 'save',
+        scenario: expect.objectContaining({ id: 'summarize', enabled: false }),
+      },
+    });
     expect(container.textContent)
       .toContain('场景已保存，但后台右键菜单刷新失败：menu offline');
     expect(container.textContent).not.toContain('场景操作失败：menu offline');
@@ -568,6 +650,42 @@ describe('sidepanel interactions', () => {
         refFileIds: ['file-image-1'],
       },
     });
+  });
+
+  it('waits for new-session acknowledgement before clearing pending chat UI', async () => {
+    let resolveReset!: (value: { ok: true }) => void;
+    const resetAck = new Promise<{ ok: true }>((resolve) => {
+      resolveReset = resolve;
+    });
+    const sendMessage = vi.fn(async (message: { type: string; payload?: unknown }) => {
+      if (message.type === 'GET_AUTH_STATUS') return { available: true, provider: 'deepseek-web' };
+      if (message.type === 'GET_OFFICIAL_API_CHAT_CONFIG') return {};
+      if (message.type === 'GET_MODEL_TYPE') return 'vision';
+      if (message.type === 'GET_VOICE_SETTINGS') return {};
+      if (message.type === 'UPLOAD_DEEPSEEK_IMAGE') {
+        return { ok: true, file: { id: 'file-image-1', fileName: 'shot.png', status: 'SUCCESS' } };
+      }
+      if (message.type === 'CHAT_NEW_SESSION') return resetAck;
+      return null;
+    });
+    stubChrome(sendMessage);
+    stubObjectUrl();
+    stubFileReader('data:image/png;base64,YWJj');
+    await renderElement(React.createElement(ChatPage));
+    await flushPromises();
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const image = new File(['abc'], 'shot.png', { type: 'image/png' });
+    Object.defineProperty(fileInput, 'files', { value: [image], configurable: true });
+    await act(async () => fileInput.dispatchEvent(new Event('change', { bubbles: true })));
+    await flushPromises();
+    expect(container.textContent).toContain('已添加');
+
+    await clickButtonByLabel('新建会话');
+    expect(container.textContent).toContain('已添加');
+    resolveReset({ ok: true });
+    await flushPromises();
+    expect(container.textContent).not.toContain('已添加');
   });
 });
 

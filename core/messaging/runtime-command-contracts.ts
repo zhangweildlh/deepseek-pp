@@ -17,7 +17,7 @@ export type RuntimeResponseFamily =
 export type RuntimeErrorFamily = 'background-error' | 'tool-error' | 'none';
 export type RuntimeCommandSurface = 'live-and-declared' | 'live-only' | 'declared-only';
 export type RuntimePayloadPresence = 'none' | 'required' | 'optional';
-export type RuntimeCommandOwner = 'typed-handler' | 'legacy-switch' | 'client-only';
+export type RuntimeCommandOwner = 'typed-handler' | 'client-only';
 
 export interface RuntimeCommandContract {
   owner: RuntimeCommandOwner;
@@ -31,12 +31,12 @@ export interface RuntimeCommandContract {
 }
 
 function command(
+  owner: RuntimeCommandOwner,
   request: RuntimeRequestBoundary,
   response: RuntimeResponseFamily,
   error: RuntimeErrorFamily = 'background-error',
   surface: RuntimeCommandSurface = 'live-and-declared',
   presence: RuntimePayloadPresence = request === 'none' ? 'none' : 'required',
-  owner: RuntimeCommandOwner = 'legacy-switch',
 ): RuntimeCommandContract {
   return { owner, surface, request: { access: request, presence }, response, error };
 }
@@ -48,7 +48,7 @@ function typedCommand(
   surface: RuntimeCommandSurface = 'live-and-declared',
   presence: RuntimePayloadPresence = request === 'none' ? 'none' : 'required',
 ): RuntimeCommandContract {
-  return command(request, response, error, surface, presence, 'typed-handler');
+  return command('typed-handler', request, response, error, surface, presence);
 }
 
 export const RUNTIME_COMMAND_CONTRACTS = {
@@ -131,57 +131,56 @@ export const RUNTIME_COMMAND_CONTRACTS = {
   GET_CURRENT_DEEPSEEK_CONVERSATION: typedCommand('none', 'status-or-domain-error'),
   GET_PROJECT_CONTEXT_FOR_CONVERSATION: typedCommand('payload-decoded', 'nullable-value'),
   GET_ARTIFACT: typedCommand('payload-decoded', 'status-or-domain-error'),
-  GET_CONFIG: command('none', 'value', 'background-error', 'live-and-declared', 'none', 'typed-handler'),
-  WHATS_NEW_DISMISSED: command('none', 'ack', 'background-error', 'live-only', 'none', 'typed-handler'),
-  GET_DEEPSEEK_API_KEY_STATUS: command('none', 'status', 'background-error', 'live-only'),
-  SAVE_DEEPSEEK_API_KEY: command('payload-cast', 'status', 'background-error', 'live-only'),
-  CLEAR_DEEPSEEK_API_KEY: command('none', 'status', 'background-error', 'live-only'),
-  GET_MULTIMODAL_SETTINGS_STATUS: command('none', 'status'),
-  SAVE_MULTIMODAL_SETTINGS: command('payload-cast', 'status'),
-  CLEAR_MULTIMODAL_SETTINGS: command('none', 'status'),
-  ANALYZE_MULTIMODAL_MEDIA: command('payload-cast', 'status-or-domain-error'),
+  GET_CONFIG: typedCommand('none', 'value'),
+  WHATS_NEW_DISMISSED: typedCommand('none', 'ack', 'background-error', 'live-only'),
+  GET_DEEPSEEK_API_KEY_STATUS: typedCommand('none', 'status', 'background-error', 'live-only'),
+  SAVE_DEEPSEEK_API_KEY: typedCommand('payload-decoded', 'status', 'background-error', 'live-only'),
+  CLEAR_DEEPSEEK_API_KEY: typedCommand('none', 'status', 'background-error', 'live-only'),
+  GET_MULTIMODAL_SETTINGS_STATUS: typedCommand('none', 'status'),
+  SAVE_MULTIMODAL_SETTINGS: typedCommand('payload-decoded', 'status'),
+  CLEAR_MULTIMODAL_SETTINGS: typedCommand('none', 'status'),
+  ANALYZE_MULTIMODAL_MEDIA: typedCommand('payload-decoded', 'status-or-domain-error'),
   GET_DEEPSEEK_THEME: typedCommand('none', 'nullable-value'),
   SET_DEEPSEEK_THEME: typedCommand('payload-decoded', 'status-or-domain-error'),
   GET_MODEL_TYPE: typedCommand('none', 'nullable-value'),
   SET_MODEL_TYPE: typedCommand('payload-decoded', 'ack'),
-  RECORD_USAGE_TURN: command('payload-cast', 'value'),
-  GET_USAGE_SUMMARY: command('payload-delegated', 'value', 'background-error', 'live-and-declared', 'optional'),
-  CLEAR_USAGE_STATS: command('none', 'ack'),
+  RECORD_USAGE_TURN: typedCommand('payload-decoded', 'value'),
+  GET_USAGE_SUMMARY: typedCommand('payload-decoded', 'value', 'background-error', 'live-and-declared', 'optional'),
+  CLEAR_USAGE_STATS: typedCommand('none', 'ack'),
   GET_BACKGROUND: typedCommand('none', 'nullable-value'),
   SAVE_BACKGROUND: typedCommand('payload-decoded', 'ack'),
   CLEAR_BACKGROUND: typedCommand('none', 'ack'),
   GET_PET: typedCommand('none', 'value'),
   SAVE_PET: typedCommand('payload-decoded', 'ack'),
   CLEAR_PET: typedCommand('none', 'ack'),
-  GET_SYNC_CONFIG: command('none', 'nullable-value'),
-  SAVE_SYNC_CONFIG: command('payload-delegated', 'status-or-domain-error'),
-  WEBDAV_TEST: command('payload-delegated', 'status-or-domain-error'),
-  SYNC_AUTHORIZE: command('payload-delegated', 'status-or-domain-error'),
-  WEBDAV_UPLOAD_LOCAL: command('payload-delegated', 'status-or-domain-error'),
-  WEBDAV_DOWNLOAD_REMOTE: command('payload-delegated', 'status-or-domain-error'),
-  CHAT_SUBMIT_PROMPT: command('payload-cast', 'status-or-domain-error', 'background-error', 'live-only'),
-  UPLOAD_DEEPSEEK_IMAGE: command('payload-delegated', 'status-or-domain-error', 'background-error', 'live-only'),
-  CHAT_NEW_SESSION: command('none', 'ack', 'background-error', 'live-only'),
-  GET_AUTH_STATUS: command('none', 'value', 'background-error', 'live-only'),
-  GET_OFFICIAL_API_CHAT_CONFIG: command('none', 'value'),
-  SAVE_OFFICIAL_API_CHAT_CONFIG: command('payload-delegated', 'value'),
-  EXPORT_DEEPSEEK_CONVERSATIONS: command('payload-delegated', 'status-or-domain-error', 'background-error', 'live-only'),
-  CANCEL_DEEPSEEK_EXPORT: command('payload-cast', 'status-or-domain-error', 'background-error', 'live-only'),
-  AUTH_STATUS_CHANGED: command('none', 'ack', 'background-error', 'live-only'),
-  GET_AUTOMATIONS: command('none', 'value', 'background-error', 'live-only'),
-  GET_AUTOMATION_RUNS: command('payload-cast', 'value', 'background-error', 'live-only'),
-  CREATE_AUTOMATION: command('payload-cast', 'value', 'background-error', 'live-only'),
-  UPDATE_AUTOMATION: command('payload-cast', 'value-or-domain-error', 'background-error', 'live-only'),
-  SET_AUTOMATION_STATUS: command('payload-cast', 'value-or-domain-error', 'background-error', 'live-only'),
-  DELETE_AUTOMATION: command('payload-cast', 'ack', 'background-error', 'live-only'),
-  RUN_AUTOMATION_NOW: command('payload-cast', 'value', 'background-error', 'live-only'),
-  SCENARIOS_UPDATED: command('none', 'ack', 'background-error', 'live-only'),
-  TOOL_CALL_EXECUTED: command('payload-cast', 'unrouted', 'none', 'declared-only', 'required', 'client-only'),
-  MEMORIES_UPDATED: command('none', 'unrouted', 'none', 'declared-only', 'none', 'client-only'),
+  GET_SYNC_CONFIG: typedCommand('none', 'nullable-value'),
+  SAVE_SYNC_CONFIG: typedCommand('payload-decoded', 'status-or-domain-error'),
+  WEBDAV_TEST: typedCommand('payload-decoded', 'status-or-domain-error'),
+  SYNC_AUTHORIZE: typedCommand('payload-decoded', 'status-or-domain-error'),
+  WEBDAV_UPLOAD_LOCAL: typedCommand('payload-decoded', 'status-or-domain-error'),
+  WEBDAV_DOWNLOAD_REMOTE: typedCommand('payload-decoded', 'status-or-domain-error'),
+  CHAT_SUBMIT_PROMPT: typedCommand('payload-decoded', 'status-or-domain-error', 'background-error', 'live-only'),
+  UPLOAD_DEEPSEEK_IMAGE: typedCommand('payload-decoded', 'status-or-domain-error', 'background-error', 'live-only'),
+  CHAT_NEW_SESSION: typedCommand('none', 'ack', 'background-error', 'live-only'),
+  GET_AUTH_STATUS: typedCommand('none', 'value', 'background-error', 'live-only'),
+  GET_OFFICIAL_API_CHAT_CONFIG: typedCommand('none', 'value'),
+  SAVE_OFFICIAL_API_CHAT_CONFIG: typedCommand('payload-decoded', 'value'),
+  EXPORT_DEEPSEEK_CONVERSATIONS: typedCommand('payload-decoded', 'status-or-domain-error', 'background-error', 'live-only', 'optional'),
+  CANCEL_DEEPSEEK_EXPORT: typedCommand('payload-decoded', 'status-or-domain-error', 'background-error', 'live-only'),
+  AUTH_STATUS_CHANGED: typedCommand('none', 'ack', 'background-error', 'live-only'),
+  GET_AUTOMATIONS: typedCommand('none', 'value', 'background-error', 'live-only'),
+  GET_AUTOMATION_RUNS: typedCommand('payload-decoded', 'value', 'background-error', 'live-only'),
+  CREATE_AUTOMATION: typedCommand('payload-decoded', 'value', 'background-error', 'live-only'),
+  UPDATE_AUTOMATION: typedCommand('payload-decoded', 'value-or-domain-error', 'background-error', 'live-only'),
+  SET_AUTOMATION_STATUS: typedCommand('payload-decoded', 'value-or-domain-error', 'background-error', 'live-only'),
+  DELETE_AUTOMATION: typedCommand('payload-decoded', 'ack', 'background-error', 'live-only'),
+  RUN_AUTOMATION_NOW: typedCommand('payload-decoded', 'value', 'background-error', 'live-only'),
+  SCENARIOS_UPDATED: typedCommand('payload-decoded', 'value', 'background-error', 'live-only', 'optional'),
+  TOOL_CALL_EXECUTED: command('client-only', 'payload-cast', 'unrouted', 'none', 'declared-only'),
+  MEMORIES_UPDATED: command('client-only', 'none', 'unrouted', 'none', 'declared-only', 'none'),
 } as const satisfies Record<string, RuntimeCommandContract>;
 
 export const TYPED_RUNTIME_COMMAND_TYPES = commandTypesOwnedBy('typed-handler');
-export const LEGACY_RUNTIME_COMMAND_TYPES = commandTypesOwnedBy('legacy-switch');
 export const CLIENT_ONLY_RUNTIME_COMMAND_TYPES = commandTypesOwnedBy('client-only');
 
 export function getRuntimeCommandOwner(type: string): RuntimeCommandOwner | undefined {

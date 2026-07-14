@@ -3,7 +3,14 @@ import tailwindcss from '@tailwindcss/vite';
 import type { Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
+import pyodidePackagePolicy from './scripts/pyodide-package-policy.json';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const safeWxtBrowser = resolve(rootDir, 'core/browser/safe-wxt-browser.ts');
@@ -21,13 +28,7 @@ const SANDBOX_CSP = [
   "connect-src 'self' blob:",
   "object-src 'none'",
 ].join('; ');
-const PYODIDE_ASSET_FILES = [
-  'pyodide.mjs',
-  'pyodide.asm.mjs',
-  'pyodide.asm.wasm',
-  'python_stdlib.zip',
-  'pyodide-lock.json',
-];
+const PYODIDE_ASSET_FILES = pyodidePackagePolicy.assets.map(({ file }) => file);
 
 function readPackageVersion(): string {
   const packageJson = JSON.parse(
@@ -137,21 +138,76 @@ function asciiJavaScriptOutputPlugin(): Plugin {
   };
 }
 
-function pyodideAssetsPlugin(): Plugin {
-  return {
-    name: 'deepseek-pp-pyodide-assets',
-    apply: 'build',
-    generateBundle() {
-      const pyodideDir = resolve(rootDir, 'node_modules/pyodide');
-      for (const file of PYODIDE_ASSET_FILES) {
-        this.emitFile({
-          type: 'asset',
-          fileName: `pyodide/${file}`,
-          source: readFileSync(resolve(pyodideDir, file)),
-        });
-      }
+function copyPyodideAssets(
+  outputDir: string,
+  publicAssets: Array<{ type: 'asset'; fileName: string }>,
+): void {
+  const sourceDir = resolve(rootDir, 'node_modules/pyodide');
+  const targetDir = resolve(outputDir, 'pyodide');
+  mkdirSync(targetDir, { recursive: true });
+
+  for (const file of PYODIDE_ASSET_FILES) {
+    const fileName = `pyodide/${file}`;
+    copyFileSync(resolve(sourceDir, file), resolve(outputDir, fileName));
+    publicAssets.push({ type: 'asset', fileName });
+  }
+}
+
+function copyBundledSkillAssets(
+  outputDir: string,
+  publicAssets: Array<{ type: 'asset'; fileName: string }>,
+): void {
+  const sources = [
+    {
+      group: 'officecli',
+      directory: resolve(rootDir, 'core/skill/officecli-official'),
+      include: (path: string) => (
+        /^skills\/[^/]+\/SKILL\.md$/.test(path)
+        || path === 'styles/INDEX.md'
+      ),
     },
-  };
+    {
+      group: 'spec-driven-develop',
+      directory: resolve(rootDir, 'core/skill/spec-driven-develop-official'),
+      include: (path: string) => /\.(?:md|py|sh|js)$/.test(path),
+    },
+  ] as const;
+  const groups: Record<string, string[]> = {};
+
+  for (const { group, directory, include } of sources) {
+    const paths = collectAssetPaths(directory, include);
+    groups[group] = paths;
+    for (const path of paths) {
+      const fileName = `bundled-skills/${group}/${path}`;
+      const target = resolve(outputDir, fileName);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(resolve(directory, path), target);
+      publicAssets.push({ type: 'asset', fileName });
+    }
+  }
+
+  const manifestFileName = 'bundled-skills/manifest.json';
+  const manifestPath = resolve(outputDir, manifestFileName);
+  mkdirSync(dirname(manifestPath), { recursive: true });
+  writeFileSync(manifestPath, `${JSON.stringify({ schemaVersion: 1, groups }, null, 2)}\n`);
+  publicAssets.push({ type: 'asset', fileName: manifestFileName });
+}
+
+function collectAssetPaths(
+  directory: string,
+  include: (relativePath: string) => boolean,
+  prefix = '',
+): string[] {
+  const paths: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      paths.push(...collectAssetPaths(resolve(directory, entry.name), include, relativePath));
+    } else if (entry.isFile() && include(relativePath)) {
+      paths.push(relativePath);
+    }
+  }
+  return paths.sort((left, right) => left.localeCompare(right));
 }
 
 function escapeNonAsciiJavaScript(source: string): string {
@@ -181,8 +237,14 @@ export default defineConfig({
   targetBrowsers: ['chrome', 'edge', 'firefox'],
   modules: ['@wxt-dev/module-react'],
   manifest: createManifest,
+  hooks: {
+    'build:done'(wxt, output) {
+      copyBundledSkillAssets(wxt.config.outDir, output.publicAssets);
+      copyPyodideAssets(wxt.config.outDir, output.publicAssets);
+    },
+  },
   vite: () => ({
-    plugins: [tailwindcss(), pyodideAssetsPlugin(), asciiJavaScriptOutputPlugin()],
+    plugins: [tailwindcss(), asciiJavaScriptOutputPlugin()],
     resolve: {
       alias: {
         '@wxt-dev/browser': safeWxtBrowser,
