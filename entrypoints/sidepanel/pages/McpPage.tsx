@@ -4,6 +4,9 @@ import {
 } from '../../../core/multimodal';
 import type { LocaleMessageKey, MessageParams, SupportedLocale } from '../../../core/i18n';
 import type {
+  McpCapabilityExposureMode,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
   McpHeaderValue,
   McpSecretValue,
   McpServerConfig,
@@ -96,6 +99,7 @@ export default function McpPage() {
     servers,
     caches,
     mcpHistory,
+    capabilitySettings,
     selected,
     selectedId,
     setSelectedId,
@@ -119,6 +123,9 @@ export default function McpPage() {
     requestPermission,
     refreshServer,
     toggleTool,
+    updateCapabilitySettings,
+    setServerExposure,
+    togglePinnedTool,
   } = useMcpPageController(t, confirm);
 
   return (
@@ -161,6 +168,14 @@ export default function McpPage() {
           </>
         )}
       />
+
+      {capabilitySettings && (
+        <AdaptiveCapabilityBudget
+          settings={capabilitySettings}
+          onSave={updateCapabilitySettings}
+          t={t}
+        />
+      )}
 
       {banner && (
         <StatusMessage tone={banner.tone === 'info' ? 'success' : banner.tone}>
@@ -233,11 +248,19 @@ export default function McpPage() {
                     cache={caches[server.id] ?? null}
                     history={mcpHistory}
                     busy={busy[server.id] ?? null}
+                    exposureMode={capabilitySettings?.servers[server.id]?.mode ?? 'direct'}
+                    pinnedDescriptorIds={capabilitySettings?.servers[server.id]?.pinnedDescriptorIds ?? []}
                     onPatch={(patch) => patchServer(server, patch)}
+                    onSetExposure={(mode) => setServerExposure(
+                      server,
+                      mode,
+                      capabilitySettings?.servers[server.id]?.pinnedDescriptorIds,
+                    )}
                     onRequestPermission={() => requestPermission(server)}
                     onRefresh={() => refreshServer(server, 'refresh')}
                     onTest={() => refreshServer(server, 'test')}
                     onToggleTool={(tool) => toggleTool(server, tool)}
+                    onTogglePinned={(tool) => togglePinnedTool(server, tool)}
                     t={t}
                     locale={locale}
                   />
@@ -246,6 +269,89 @@ export default function McpPage() {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+function AdaptiveCapabilityBudget({
+  settings,
+  onSave,
+  t,
+}: {
+  settings: McpCapabilitySettings;
+  onSave: (patch: McpCapabilitySettingsPatch) => Promise<void>;
+  t: Translator;
+}) {
+  const [maxTools, setMaxTools] = useState(String(settings.adaptiveMaxDirectTools));
+  const [maxBytes, setMaxBytes] = useState(String(settings.adaptiveMaxPromptBytes));
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setMaxTools(String(settings.adaptiveMaxDirectTools));
+    setMaxBytes(String(settings.adaptiveMaxPromptBytes));
+  }, [settings.adaptiveMaxDirectTools, settings.adaptiveMaxPromptBytes]);
+
+  const save = async () => {
+    const adaptiveMaxDirectTools = Number(maxTools);
+    const adaptiveMaxPromptBytes = Number(maxBytes);
+    if (
+      !Number.isInteger(adaptiveMaxDirectTools) ||
+      adaptiveMaxDirectTools < 1 ||
+      adaptiveMaxDirectTools > 64 ||
+      !Number.isInteger(adaptiveMaxPromptBytes) ||
+      adaptiveMaxPromptBytes < 2_000 ||
+      adaptiveMaxPromptBytes > 256_000
+    ) {
+      setError(t('sidepanel.mcpPage.detail.adaptiveBudgetInvalid'));
+      return;
+    }
+    setError('');
+    await onSave({ adaptiveMaxDirectTools, adaptiveMaxPromptBytes });
+  };
+
+  return (
+    <div className="ds-card rounded-lg p-3 space-y-2">
+      <div>
+        <div className="text-xs font-medium" style={{ color: 'var(--ds-text)' }}>
+          {t('sidepanel.mcpPage.detail.adaptiveBudget')}
+        </div>
+        <div className="text-[11px] mt-0.5" style={{ color: 'var(--ds-text-tertiary)' }}>
+          {t('sidepanel.mcpPage.detail.adaptiveBudgetDescription')}
+        </div>
+      </div>
+      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+        <Field label={t('sidepanel.mcpPage.detail.adaptiveMaxTools')}>
+          <input
+            type="number"
+            min="1"
+            max="64"
+            value={maxTools}
+            onChange={(event) => setMaxTools(event.target.value)}
+            className="ds-input w-full rounded-lg px-2 py-1.5 text-xs"
+          />
+        </Field>
+        <Field label={t('sidepanel.mcpPage.detail.adaptiveMaxPromptBytes')}>
+          <input
+            type="number"
+            min="2000"
+            max="256000"
+            step="1000"
+            value={maxBytes}
+            onChange={(event) => setMaxBytes(event.target.value)}
+            className="ds-input w-full rounded-lg px-2 py-1.5 text-xs"
+          />
+        </Field>
+        <button
+          type="button"
+          onClick={() => { void save(); }}
+          className="ds-btn-secondary px-2.5 py-1.5 text-[11px] rounded-md"
+        >
+          {t('sidepanel.mcpPage.detail.adaptiveBudgetApply')}
+        </button>
+      </div>
+      {error && (
+        <div className="text-[11px]" style={{ color: 'var(--ds-danger)' }}>{error}</div>
       )}
     </div>
   );
@@ -673,11 +779,15 @@ function ServerDetail({
   cache,
   history,
   busy,
+  exposureMode,
+  pinnedDescriptorIds,
   onPatch,
+  onSetExposure,
   onRequestPermission,
   onRefresh,
   onTest,
   onToggleTool,
+  onTogglePinned,
   t,
   locale,
 }: {
@@ -685,11 +795,15 @@ function ServerDetail({
   cache: McpToolCacheEntry | null;
   history: ToolCallHistoryRecord[];
   busy: BusyAction | null;
+  exposureMode: McpCapabilityExposureMode;
+  pinnedDescriptorIds: readonly string[];
   onPatch: (patch: Partial<McpServerConfig>) => Promise<void>;
+  onSetExposure: (mode: McpCapabilityExposureMode) => Promise<void>;
   onRequestPermission: () => void;
   onRefresh: () => void;
   onTest: () => void;
   onToggleTool: (tool: ToolDescriptor) => void;
+  onTogglePinned: (tool: ToolDescriptor) => void;
   t: Translator;
   locale: SupportedLocale;
 }) {
@@ -740,6 +854,36 @@ function ServerDetail({
       )}
 
       <div className="ds-card rounded-lg p-3 space-y-2">
+        <div>
+          <div className="text-xs font-medium" style={{ color: 'var(--ds-text)' }}>
+            {t('sidepanel.mcpPage.detail.promptExposure')}
+          </div>
+          <div className="text-[11px] mt-0.5" style={{ color: 'var(--ds-text-tertiary)' }}>
+            {t('sidepanel.mcpPage.detail.promptExposureDescription')}
+          </div>
+        </div>
+        <select
+          value={exposureMode}
+          onChange={(event) => { void onSetExposure(event.target.value as McpCapabilityExposureMode); }}
+          className="ds-input w-full rounded-lg px-3 py-2 text-sm"
+        >
+          <option value="direct">{t('sidepanel.mcpPage.detail.exposureDirect')}</option>
+          <option value="adaptive">{t('sidepanel.mcpPage.detail.exposureAdaptive')}</option>
+          <option value="on_demand">{t('sidepanel.mcpPage.detail.exposureOnDemand')}</option>
+        </select>
+        {exposureMode === 'adaptive' && (
+          <div className="text-[11px]" style={{ color: 'var(--ds-text-tertiary)' }}>
+            {t('sidepanel.mcpPage.detail.exposureAdaptiveHint', { count: pinnedDescriptorIds.length })}
+          </div>
+        )}
+        {exposureMode === 'on_demand' && (
+          <div className="text-[11px]" style={{ color: 'var(--ds-text-tertiary)' }}>
+            {t('sidepanel.mcpPage.detail.exposureOnDemandHint')}
+          </div>
+        )}
+      </div>
+
+      <div className="ds-card rounded-lg p-3 space-y-2">
         <ToggleRow
           title={t('sidepanel.mcpPage.detail.executionPolicy')}
           description={t('sidepanel.mcpPage.detail.injectionSummary', { count: countEnabledMcpTools(server, tools) })}
@@ -769,7 +913,15 @@ function ServerDetail({
         ) : (
           <div className="space-y-2">
             {tools.map((tool) => (
-              <ToolRow key={tool.id} server={server} tool={tool} onToggle={() => onToggleTool(tool)} t={t} />
+              <ToolRow
+                key={tool.id}
+                server={server}
+                tool={tool}
+                pinned={pinnedDescriptorIds.includes(tool.id)}
+                onToggle={() => onToggleTool(tool)}
+                onTogglePinned={() => onTogglePinned(tool)}
+                t={t}
+              />
             ))}
           </div>
         )}
@@ -858,12 +1010,16 @@ function CollapsibleSection({
 function ToolRow({
   server,
   tool,
+  pinned,
   onToggle,
+  onTogglePinned,
   t,
 }: {
   server: McpServerConfig;
   tool: ToolDescriptor;
+  pinned: boolean;
   onToggle: () => void;
+  onTogglePinned: () => void;
   t: Translator;
 }) {
   const enabled = isMcpToolEnabled(server, tool);
@@ -874,11 +1030,21 @@ function ToolRow({
           <div className="text-xs font-medium truncate" style={{ color: 'var(--ds-text)' }}>{tool.title || tool.name}</div>
           <div className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--ds-blue)' }}>{tool.invocationName}</div>
         </div>
-        <ToggleRow
-          title={enabled ? t('sidepanel.mcpPage.auto') : t('sidepanel.mcpPage.disabled')}
-          enabled={enabled}
-          onToggle={onToggle}
-        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onTogglePinned}
+            aria-pressed={pinned}
+            className="ds-btn-secondary px-2 py-1 text-[10px] rounded-md"
+          >
+            {pinned ? t('sidepanel.mcpPage.detail.unpin') : t('sidepanel.mcpPage.detail.pin')}
+          </button>
+          <ToggleRow
+            title={enabled ? t('sidepanel.mcpPage.auto') : t('sidepanel.mcpPage.disabled')}
+            enabled={enabled}
+            onToggle={onToggle}
+          />
+        </div>
       </div>
       <div className="text-[11px] mt-1 leading-4" style={{ color: 'var(--ds-text-secondary)' }}>
         {tool.description}

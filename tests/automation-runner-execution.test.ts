@@ -12,6 +12,7 @@ import {
 import type { DeepSeekAutomationClient } from '../core/deepseek/automation-client-port';
 import { DEEPSEEK_BODY_BUDGETS } from '../core/deepseek/contracts';
 import { NetworkPolicyError } from '../core/network/request-policy';
+import { createMcpCapabilityToolDescriptors } from '../core/mcp/capability-tools';
 import type { ToolDescriptor, ToolResult } from '../core/types';
 import { runDeepSeekAutomation, type AutomationRunnerOptions } from '../core/automation/runner';
 
@@ -301,6 +302,37 @@ describe('automation runner execution context', () => {
 
     expect(result.ok).toBe(true);
     expect(executeToolCall).toHaveBeenCalledTimes(1);
+    expect(adapterMocks.submitPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues through catalog controls so on-demand MCP capabilities can discover before invoking', async () => {
+    const discover = createMcpCapabilityToolDescriptors('en')
+      .find((descriptor) => descriptor.invocationName === 'mcp_discover');
+    if (!discover) throw new Error('Missing MCP capability discovery descriptor.');
+    adapterMocks.submitPrompt
+      .mockResolvedValueOnce(modelTurn(
+        '<mcp_discover>{"query":"find a workspace tool"}</mcp_discover>',
+        101,
+      ))
+      .mockResolvedValueOnce(modelTurn('Capability catalog consulted.', 102));
+    const executeToolCall = vi.fn(async (): Promise<ToolResult> => ({
+      ok: true,
+      summary: 'catalog result',
+      name: discover.name,
+      provider: discover.provider,
+      descriptorId: discover.id,
+      output: { candidates: [] },
+    }));
+
+    const result = await runAutomation(createRequest({
+      promptContext: { toolDescriptors: [discover] },
+    }), { executeToolCall });
+
+    expect(result.ok).toBe(true);
+    expect(executeToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'mcp_discover', provider: discover.provider }),
+      expect.any(Object),
+    );
     expect(adapterMocks.submitPrompt).toHaveBeenCalledTimes(2);
   });
 });

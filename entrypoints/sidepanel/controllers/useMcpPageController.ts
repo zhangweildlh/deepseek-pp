@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { LocaleMessageKey, MessageParams } from '../../../core/i18n';
 import type {
+  McpCapabilityExposureMode,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
   McpServerConfig,
   McpServerCreateInput,
   McpToolCacheEntry,
@@ -37,6 +40,7 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [caches, setCaches] = useState<Record<string, McpToolCacheEntry | null>>({});
   const [history, setHistory] = useState<ToolCallHistoryRecord[]>([]);
+  const [capabilitySettings, setCapabilitySettings] = useState<McpCapabilitySettings | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -72,6 +76,7 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
       setServers(snapshot.servers);
       setCaches(snapshot.caches);
       setHistory(snapshot.history);
+      setCapabilitySettings(snapshot.capabilitySettings);
       const shouldSelectInitialServer = !selectionInitialized.current
         && snapshot.servers.length > 0;
       if (shouldSelectInitialServer) selectionInitialized.current = true;
@@ -276,6 +281,40 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
     });
   }, [patchServer]);
 
+  const setServerExposure = useCallback(async (
+    server: McpServerConfig,
+    mode: McpCapabilityExposureMode,
+    pinnedDescriptorIds?: readonly string[],
+  ) => {
+    try {
+      const settings = await mcpToolsController.setServerExposure({
+        serverId: server.id,
+        mode,
+        pinnedDescriptorIds,
+      });
+      setCapabilitySettings(settings);
+    } catch (error) {
+      showBanner('error', getRuntimeErrorMessage(error));
+    }
+  }, [showBanner]);
+
+  const updateCapabilitySettings = useCallback(async (patch: McpCapabilitySettingsPatch) => {
+    try {
+      const settings = await mcpToolsController.updateCapabilitySettings(patch);
+      setCapabilitySettings(settings);
+    } catch (error) {
+      showBanner('error', getRuntimeErrorMessage(error));
+    }
+  }, [showBanner]);
+
+  const togglePinnedTool = useCallback(async (server: McpServerConfig, tool: ToolDescriptor) => {
+    const configured = capabilitySettings?.servers[server.id];
+    const pinned = new Set(configured?.pinnedDescriptorIds ?? []);
+    if (pinned.has(tool.id)) pinned.delete(tool.id);
+    else pinned.add(tool.id);
+    await setServerExposure(server, configured?.mode ?? 'direct', [...pinned]);
+  }, [capabilitySettings, setServerExposure]);
+
   const selected = selectedId
     ? servers.find((server) => server.id === selectedId) ?? null
     : null;
@@ -289,6 +328,7 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
     servers,
     caches,
     mcpHistory: history.filter((record) => record.call.provider?.kind === 'mcp'),
+    capabilitySettings,
     selected,
     selectedId,
     setSelectedId,
@@ -313,6 +353,9 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
     requestPermission,
     refreshServer: connectServer,
     toggleTool,
+    updateCapabilitySettings,
+    setServerExposure,
+    togglePinnedTool,
   };
 }
 

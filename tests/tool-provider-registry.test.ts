@@ -4,6 +4,12 @@ import {
   type RuntimeToolProvider,
   type ToolProviderRegistration,
 } from '../core/tool/provider-registry';
+import {
+  MCP_CAPABILITY_TOOL_PROVIDER_ID,
+  createMcpCapabilityToolDescriptors,
+  disambiguateMcpCapabilityToolDescriptors,
+  executeMcpCapabilityToolCall,
+} from '../core/mcp/capability-tools';
 import type { ToolCall, ToolDescriptor, ToolProviderIdentity, ToolResult } from '../core/tool/types';
 
 const CONTEXT = { locale: 'en' as const, includeDisabled: false };
@@ -38,6 +44,35 @@ describe('ToolProviderRegistry', () => {
     });
     expect(mcpExecute).toHaveBeenCalledWith(call, mcpDescriptor, EXECUTION_CONTEXT);
     expect(localExecute).not.toHaveBeenCalled();
+  });
+
+  it('lets a local provider deterministically disambiguate its controls from a remote MCP name', async () => {
+    const controls = createMcpCapabilityToolDescriptors('en');
+    const remote = makeDescriptor(
+      mcpIdentity('remote'),
+      'mcp:remote:mcp_discover',
+      'mcp_discover',
+    );
+    const capabilityProvider: RuntimeToolProvider = {
+      registration: { kind: 'local', id: MCP_CAPABILITY_TOOL_PROVIDER_ID },
+      async listTools() { return controls; },
+      disambiguateInvocationNames: disambiguateMcpCapabilityToolDescriptors,
+      execute: executeMcpCapabilityToolCall,
+    };
+    const registry = new ToolProviderRegistry([
+      capabilityProvider,
+      makeProvider({ kind: 'mcp' }, [remote]),
+    ]);
+
+    const descriptors = await registry.listTools(CONTEXT);
+    const discover = descriptors.find((descriptor) => descriptor.id === controls[0]?.id);
+
+    expect(discover).toMatchObject({
+      id: controls[0]?.id,
+      name: 'dpp_mcp_discover',
+      invocationName: 'dpp_mcp_discover',
+    });
+    expect(descriptors.find((descriptor) => descriptor.id === remote.id)).toBe(remote);
   });
 
   it('rejects duplicate provider registrations', () => {

@@ -89,11 +89,14 @@ export function createToolExecutionRecord(
   limits: { detailMaxLength: number; outputMaxLength: number },
 ): ToolExecutionRecord {
   return {
-    name: call.name,
-    provider: call.provider,
-    descriptorId: call.descriptorId,
+    name: result.name ?? call.name,
+    provider: result.provider ?? call.provider,
+    descriptorId: result.descriptorId ?? call.descriptorId,
     result: {
       ok: result.ok,
+      name: result.name,
+      provider: result.provider,
+      descriptorId: result.descriptorId,
       summary: result.summary,
       detail: clampText(result.detail, limits.detailMaxLength),
       output: result.output === undefined

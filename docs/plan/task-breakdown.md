@@ -1,87 +1,47 @@
-# DeepSeek++ PC Runtime Hardening Wave 2 — Task Breakdown
+# MCP Capability Plane — Task Breakdown
 
-## Delivery Model
+## Overview
 
-本轮使用 7 个 GitHub Issue 作为验收与遥测单元，但不采用一 Issue 一 PR。所有任务进入 `codex/pc-runtime-hardening-wave-2` 集成分支，按独立 owner lane 形成可审查提交，最终由一张 batch PR 合并。Android、移动 WebView、移动构建与移动发布路径不在范围内。
+- **Total phases**: 2
+- **Total tasks**: 5
+- **Delivery batches**: 1 coherent implementation batch
+- **Tracking mode**: LOCAL_ONLY
+- **Scope reference**: GitHub Issue #407; no new public planning Issues are created in this run
 
-## Task Matrix
+## Global Design Constraints
 
-| ID | Task | Priority / size | Depends on | Lane | S.U.P.E.R | Primary scope | Acceptance evidence |
-|:--|:--|:--|:--|:--:|:--|:--|:--|
-| W2.1 | Make MCP response decoding and budgets authoritative | P0 / M | None | A | P, U, R | `core/mcp/transports/common.ts`, `core/mcp/client.ts`, MCP fixtures/tests | Reject wrong JSON-RPC version/ID and simultaneous `result` + `error` before consumption; truncate results on UTF-8 byte boundaries with an explicit signal; discovery never exceeds `maxToolCount`; legal fixtures remain unchanged. |
-| W2.2 | Decode DeepSeek request bodies once before privileged work | P1 / M | None | B | S, P, R | `core/interceptor/request-augmentation.ts`, Content augmentation caller, request/prompt tests | Only a plain object with a string prompt enters augmentation; malformed-but-valid JSON fails before authorization/project/prompt work; legal prompt bytes and unrelated sibling fields remain unchanged. |
-| W2.3 | Give incomplete streaming tool calls one terminal EOF outcome | P1 / M | W2.2 | B | S, U, R | streaming parser, passive fetch hook, inline-agent consumer, related tests | An unclosed call never executes; a previously emitted `started` event receives exactly one same-ID non-executable parse-failure terminal event; externalized state is released; repeated flush is idempotent. |
-| W2.4 | Align desktop platform capability and loading truth | P1 / M | None | C | P, E, R | `core/platform/*`, narrow sync/Side Panel consumers, platform fixtures/tests | Pre-load state fails closed; `downloads` stays false without manifest permission; sync identity has a narrow production consumer-owned check; the serialized 15-key environment remains readable; Chrome/Edge/Firefox degradation stays explicit. |
-| W2.5 | Derive Shell version and catalog checks from authoritative sources | P1 / M | None | D | S, P, R | `core/shell/*`, `packages/shell-host/native/*`, package/install tests | Native `serverInfo.version` matches package metadata from installed npm layout; exact 12-tool name/order/schema/risk and Native protocol v1 remain stable; no repo-only runtime import is introduced. |
-| W2.6 | Increase first Chat screen bundle headroom | P1 / M | None | E | S, E, R | `ChatPage.tsx`, rich message renderer boundary, chunk budget/tests | Empty first Chat screen does not load rich rendering code; interaction behavior is unchanged; raw and gzip measurements improve on all PC builds; the executable ceiling is lowered only after measurement. |
-| W2.7 | Reconcile live compatibility gaps and close the batch | P1 / M | W2.1–W2.6 | F | U, P, E, R | live external-runtime fixtures, active progress index, CI/smoke scripts | Resolved gaps are removed; every retained gap has a current or explicit deferred owner; archived run is not edited; targeted tests, compile, prompt freeze, all-browser builds, manifest/UTF-8 checks and `ci:quality` pass. Real Chrome smoke is recorded as pass only when an unpacked extension is actually observed. |
+- One authoritative MCP descriptor cache and one target authorization resolver.
+- Direct descriptors and capability handles are only Prompt projections; neither creates another provider execution path.
+- Every target execution verifies an exact descriptor security snapshot before provider payload rehydration/I/O.
+- Capability visibility never widens existing server enablement, allowlist or execution policy.
+- New persistent data is explicit, versioned, deterministic and fail-closed.
+- Full Schema is never silently copied or silently truncated; any compact result identifies its limits.
 
-GitHub mapping: W2.1 [#395](https://github.com/zhu1090093659/deepseek-pp/issues/395), W2.2 [#396](https://github.com/zhu1090093659/deepseek-pp/issues/396), W2.3 [#397](https://github.com/zhu1090093659/deepseek-pp/issues/397), W2.4 [#398](https://github.com/zhu1090093659/deepseek-pp/issues/398), W2.5 [#399](https://github.com/zhu1090093659/deepseek-pp/issues/399), W2.6 [#400](https://github.com/zhu1090093659/deepseek-pp/issues/400), W2.7 [#401](https://github.com/zhu1090093659/deepseek-pp/issues/401).
+## Phase 1: Core Capability Contracts
 
-## Phase 1 — External Boundary Correctness
+| ID | Task | Priority / effort | Depends on | Delivery batch | S.U.P.E.R | Test expectation | Acceptance |
+|:--|:--|:--|:--|:--|:--|:--|:--|
+| CP.1 | Implement capability settings, catalog projection and deterministic adaptive selection | P0 / L | — | CP-B1 | S,P,R | Unit tests for decode, policy, ranking and budget | Default remains direct; on-demand/adaptive projection only contains eligible true descriptors/helpers |
+| CP.2 | Implement background-owned capability leases and a single resolved-target execution path | P0 / XL | CP.1 | CP-B1 | P,U,R | Lease/security/replay tests plus tool runtime integration | A handle maps to exactly one current descriptor, cannot cross owner/revision/expiry, and records actual tool execution |
 
-### W2.1 MCP response and budget authority
+## Phase 2: Runtime Surfaces and Product Controls
 
-- Add one direction-specific response decoder at the receiving boundary; transports may call it but must not repair invalid wire data.
-- Count result limits in UTF-8 bytes and avoid splitting surrogate pairs.
-- Apply the discovery cap per item while preserving valid cursor/pagination behavior.
-- Required checks: MCP transport/common, external-contract, discovery/tool-call tests, mock/live-mock and MCP smoke.
-- Public Issue wording describes malformed-response rejection and bounded resources, not exploit payloads or trust-boundary internals.
+| ID | Task | Priority / effort | Depends on | Delivery batch | S.U.P.E.R | Test expectation | Acceptance |
+|:--|:--|:--|:--|:--|:--|:--|:--|
+| CP.3 | Route manual chat and inline-agent prompts through the shared projection | P0 / L | CP.1, CP.2 | CP-B1 | U,P,R | Request/authorization/inline-agent regressions | User request intent selects direct tools; capability control calls continue correctly |
+| CP.4 | Route Side Panel chat and automation through the same projection; expose MCP visibility settings | P1 / L | CP.1, CP.2 | CP-B1 | S,U,P | Chat/automation/controller tests | All four surfaces agree on capability mode; users can configure it without altering execution allowlists |
+| CP.5 | Contract closure, performance evidence and compatibility review | P0 / L | CP.1–CP.4 | CP-B1 | P,R | Targeted tests, compile, prompt freeze, MCP smoke/mock, all-browser build | No raw proxy bypass, default prompt fixture preserved, configured large catalogs stay bounded |
 
-### W2.2 Strict DeepSeek request decode
+## Delivery Batch
 
-- Parse and validate once, before authorization or data lookup.
-- Reuse the validated value; do not add another request parser or fallback path.
-- Preserve every legal body field and byte-compatible prompt output.
-- Required checks: request augmentation, bridge/protocol, multimodal paths where applicable, and prompt freeze.
+| Batch | Tasks | Goal | Branch | Validation |
+|:--|:--|:--|:--|:--|
+| CP-B1 | CP.1–CP.5 | One architecture and rollback unit because all tasks share descriptor, authorization and continuation contracts | `codex/mcp-capability-plane` | targeted suites, compile, prompt freeze, MCP smoke/mock, build:all, final diff review |
 
-### W2.3 Terminal incomplete tool calls
+## Delivery Status
 
-- Extend the existing parser event contract rather than adding a second cleanup channel.
-- The terminal failure is observable, non-executable and exactly once.
-- Keep parser, passive interception and inline-agent semantics aligned.
-- Required checks: parser/text, passive fetch lifecycle, inline-agent and authorization/externalized-state cleanup.
+CP-B1 is complete on the local branch. The full `npm run ci:quality` gate passed after the final contract, i18n and runtime-inventory updates.
 
-## Phase 2 — Capability, Performance and Closure
+## Adaptive Control
 
-### W2.4 Platform truth
-
-- Keep the existing environment record compatible; do not expand the broad platform abstraction.
-- Remove optimistic pre-load behavior and unsupported permission inference.
-- Add a capability only with its actual production consumer in the same task.
-- Required checks: platform external contract, Side Panel controllers, sync OAuth, manifest policy, all-browser builds.
-
-### W2.5 Shell truth
-
-- Use package metadata for the released server version in both repo and installed-package layouts.
-- Prefer shared serializable evidence or contract tests for the browser/native catalog; do not make the native executable depend on repo-only TypeScript paths.
-- Required checks: Shell external/runtime/installer tests, pack-layout verification and the complete Shell smoke command set.
-
-### W2.6 Side Panel first-chat budget
-
-- Record the before metric, move rich rendering behind a real demand boundary, then record the after metric.
-- Do not claim improvement by raising the budget or changing first-screen behavior.
-- Required checks: chat interactions, lazy-route/static graph assertions, `build:all` and Side Panel chunk budget for Chrome/Edge/Firefox.
-
-### W2.7 Compatibility and quality closure
-
-- Update only the active wave-2 progress/index and live fixtures; leave the completed archive read-only.
-- A short deterministic Chrome smoke feasibility check may run, but absence of a proven unpacked load remains an explicit gap and does not become a false pass.
-- Record telemetry on all seven Issues before the final PR closes them.
-
-## Conflict and Parallelism Rules
-
-- W2.2 then W2.3 are serial because both own interceptor hot paths.
-- W2.4 and W2.6 may run concurrently only while they avoid the same Side Panel file; otherwise W2.6 follows the narrow platform consumer change.
-- W2.7 is the sole owner of shared compatibility/progress documents.
-- W2.1, W2.4, W2.5 and W2.6 are otherwise independent and may run in parallel.
-
-## Validation Order
-
-1. Task-local tests with a 60-second hard timeout.
-2. `npm run compile` and applicable static checks.
-3. `npm run prompt:freeze` for W2.2/W2.3 and final closure.
-4. `npm run build:all`.
-5. `npm run verify:manifest-policy` and `npm run verify:extension-utf8`.
-6. Narrow MCP/Shell/Side Panel smoke and budget checks.
-7. `npm run ci:quality` followed by a final diff review.
+Phase 1 has 2 tasks: annotate=1, replan=1, rescope=2. Phase 2 has 3 tasks: annotate=1, replan=2, rescope=2. Any material unplanned dependency is recorded before the next task; threshold action is applied before continuing.

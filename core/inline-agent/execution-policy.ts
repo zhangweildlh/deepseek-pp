@@ -1,4 +1,5 @@
 import type { ToolExecutionRecord } from '../types';
+import { MCP_CAPABILITY_TOOL_PROVIDER_ID } from '../mcp/capability-contract';
 
 export { INCOMPLETE_TOOL_CALL_ERROR_CODE } from '../tool/execution-error';
 
@@ -14,6 +15,7 @@ export function selectContinuableToolExecutions(
     !execution.pending &&
     (
       execution.provider?.kind === 'mcp' ||
+      execution.provider?.id === MCP_CAPABILITY_TOOL_PROVIDER_ID ||
       execution.provider?.id === 'web' ||
       execution.provider?.id === 'browser_control' ||
       execution.name === 'web_search' ||

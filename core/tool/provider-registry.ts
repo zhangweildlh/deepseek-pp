@@ -1,6 +1,7 @@
 import type { SupportedLocale } from '../i18n';
 import type {
   ToolCall,
+  ToolCapabilityScope,
   ToolDescriptor,
   ToolProviderIdentity,
   ToolResult,
@@ -20,11 +21,23 @@ export interface ToolProviderExecutionContext {
   signal?: AbortSignal;
   timeoutMs?: number;
   maxResultBytes?: number;
+  /** Full live descriptors, supplied only after runtime authorization. */
+  availableDescriptors?: readonly ToolDescriptor[];
+  /** Background-derived capability scope; never populated from a ToolCall payload. */
+  capabilityScope?: ToolCapabilityScope;
 }
 
 export interface RuntimeToolProvider {
   registration: ToolProviderRegistration;
   listTools(context: ToolProviderDescriptorContext): Promise<ToolDescriptor[]>;
+  /**
+   * Optional provider-owned deterministic disambiguation. It may only rename
+   * descriptors it owns; the registry validates the resulting contracts.
+   */
+  disambiguateInvocationNames?(
+    descriptors: readonly ToolDescriptor[],
+    occupiedInvocationNames: ReadonlySet<string>,
+  ): ToolDescriptor[];
   execute(
     call: ToolCall,
     authorizedDescriptor: ToolDescriptor,
@@ -78,17 +91,27 @@ export class ToolProviderRegistry {
     const groups = await Promise.all(
       this.providers.map((provider) => provider.listTools(context)),
     );
-    groups.forEach((descriptors, index) => {
-      const provider = this.providers[index];
-      for (const descriptor of descriptors) {
-        if (registrationOwnsIdentity(provider.registration, descriptor.provider)) continue;
-        throw new ToolProviderRegistryError(
-          'tool_provider_descriptor_mismatch',
-          `Provider ${registrationKey(provider.registration)} does not own descriptor ${descriptor.id}`,
-        );
-      }
+    const resolvedGroups = groups.map((descriptors, index) => {
+      this.assertProviderOwnsDescriptors(this.providers[index], descriptors);
+      return descriptors;
     });
-    const descriptors = groups.flat();
+    for (let index = 0; index < resolvedGroups.length; index += 1) {
+      const provider = this.providers[index];
+      if (!provider.disambiguateInvocationNames) continue;
+      const occupiedInvocationNames = new Set(
+        resolvedGroups.flatMap((descriptors, groupIndex) => (
+          groupIndex === index ? [] : descriptors.map((descriptor) => descriptor.invocationName)
+        )),
+      );
+      const resolved = provider.disambiguateInvocationNames(
+        resolvedGroups[index],
+        occupiedInvocationNames,
+      );
+      this.assertProviderOwnsDescriptors(provider, resolved);
+      this.assertDescriptorIdentityPreserved(resolvedGroups[index], resolved, provider);
+      resolvedGroups[index] = resolved;
+    }
+    const descriptors = resolvedGroups.flat();
     this.assertDescriptorContracts(descriptors);
     return descriptors;
   }
@@ -149,6 +172,42 @@ export class ToolProviderRegistry {
       descriptorIds.add(descriptor.id);
       invocationNames.add(descriptor.invocationName);
     }
+  }
+
+  private assertProviderOwnsDescriptors(
+    provider: RuntimeToolProvider,
+    descriptors: readonly ToolDescriptor[],
+  ): void {
+    for (const descriptor of descriptors) {
+      if (registrationOwnsIdentity(provider.registration, descriptor.provider)) continue;
+      throw new ToolProviderRegistryError(
+        'tool_provider_descriptor_mismatch',
+        `Provider ${registrationKey(provider.registration)} does not own descriptor ${descriptor.id}`,
+      );
+    }
+  }
+
+  private assertDescriptorIdentityPreserved(
+    source: readonly ToolDescriptor[],
+    resolved: readonly ToolDescriptor[],
+    provider: RuntimeToolProvider,
+  ): void {
+    const unchanged = source.length === resolved.length && source.every((descriptor, index) => {
+      const candidate = resolved[index];
+      return candidate?.id === descriptor.id &&
+        candidate.provider === descriptor.provider &&
+        candidate.title === descriptor.title &&
+        candidate.description === descriptor.description &&
+        candidate.inputSchema === descriptor.inputSchema &&
+        candidate.outputSchema === descriptor.outputSchema &&
+        candidate.execution === descriptor.execution &&
+        candidate.annotations === descriptor.annotations;
+    });
+    if (unchanged) return;
+    throw new ToolProviderRegistryError(
+      'tool_provider_descriptor_mismatch',
+      `Provider ${registrationKey(provider.registration)} changed descriptor identity while resolving invocation names.`,
+    );
   }
 }
 

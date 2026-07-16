@@ -54,7 +54,10 @@ interface DecodedCreateToolAuthorizationPayload {
   chatSessionId?: string | null;
   runId?: string;
   descriptorIds?: string[];
+  toolIntent?: string;
 }
+
+const MAX_TOOL_INTENT_CHARS = 16_000;
 
 interface SpecialDecodedPayloads {
   CREATE_TOOL_AUTHORIZATION: DecodedDomainPayload<DecodedCreateToolAuthorizationPayload>;
@@ -81,6 +84,27 @@ type ToolRuntimePayloadDecoderMap = {
 };
 
 export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
+  UPDATE_MCP_CAPABILITY_SETTINGS(value) {
+    const payload = recordValue(value, 'UPDATE_MCP_CAPABILITY_SETTINGS.payload');
+    assertOnlyCapabilitySettingsPatchKeys(payload, 'UPDATE_MCP_CAPABILITY_SETTINGS.payload');
+    if (payload.adaptiveMaxDirectTools !== undefined) {
+      positiveInteger(payload.adaptiveMaxDirectTools, 'UPDATE_MCP_CAPABILITY_SETTINGS.payload.adaptiveMaxDirectTools');
+    }
+    if (payload.adaptiveMaxPromptBytes !== undefined) {
+      positiveInteger(payload.adaptiveMaxPromptBytes, 'UPDATE_MCP_CAPABILITY_SETTINGS.payload.adaptiveMaxPromptBytes');
+    }
+    return typedPayload<'UPDATE_MCP_CAPABILITY_SETTINGS'>(payload);
+  },
+  SET_MCP_CAPABILITY_SERVER_EXPOSURE(value) {
+    const payload = recordValue(value, 'SET_MCP_CAPABILITY_SERVER_EXPOSURE.payload');
+    assertOnlyKeys(payload, ['serverId', 'mode', 'pinnedDescriptorIds'], 'SET_MCP_CAPABILITY_SERVER_EXPOSURE.payload');
+    stringValue(payload.serverId, 'SET_MCP_CAPABILITY_SERVER_EXPOSURE.payload.serverId');
+    enumValue(payload.mode, ['direct', 'adaptive', 'on_demand'], 'SET_MCP_CAPABILITY_SERVER_EXPOSURE.payload.mode');
+    if (payload.pinnedDescriptorIds !== undefined) {
+      stringArray(payload.pinnedDescriptorIds, 'SET_MCP_CAPABILITY_SERVER_EXPOSURE.payload.pinnedDescriptorIds');
+    }
+    return typedPayload<'SET_MCP_CAPABILITY_SERVER_EXPOSURE'>(payload);
+  },
   GET_MCP_SERVER(value) {
     return decodeStringFieldPayload<'GET_MCP_SERVER'>(value, 'GET_MCP_SERVER.payload', 'id');
   },
@@ -175,6 +199,9 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
         && typeof value.chatSessionId !== 'string'
       )
       || (value.runId !== undefined && typeof value.runId !== 'string')
+      || (value.toolIntent !== undefined && (
+        typeof value.toolIntent !== 'string' || value.toolIntent.length > MAX_TOOL_INTENT_CHARS
+      ))
       || (
         value.descriptorIds !== undefined
         && (
@@ -191,6 +218,7 @@ export const TOOL_RUNTIME_PAYLOAD_DECODERS: ToolRuntimePayloadDecoderMap = {
       chatSessionId: value.chatSessionId,
       runId: value.runId,
       descriptorIds: value.descriptorIds as string[] | undefined,
+      toolIntent: value.toolIntent as string | undefined,
     });
   },
   CLOSE_TOOL_AUTHORIZATION(value) {
@@ -409,6 +437,23 @@ function booleanValue(value: unknown, path: string): boolean {
 
 function optionalBoolean(value: unknown, path: string): void {
   if (value !== undefined) booleanValue(value, path);
+}
+
+function positiveInteger(value: unknown, path: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${path} must be a positive integer`);
+  }
+  return value;
+}
+
+function assertOnlyCapabilitySettingsPatchKeys(value: Record<string, unknown>, path: string): void {
+  assertOnlyKeys(value, ['adaptiveMaxDirectTools', 'adaptiveMaxPromptBytes'], path);
+}
+
+function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], path: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) throw new Error(`${path}.${key} is not allowed`);
+  }
 }
 
 function finiteNumber(value: unknown, path: string): number {

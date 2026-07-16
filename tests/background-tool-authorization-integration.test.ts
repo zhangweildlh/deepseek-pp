@@ -101,6 +101,7 @@ describe('R4.2 real tool authorization handler composition', () => {
     const dependencies: ToolExecutionRuntimeHandlerDependencies = {
       getLocale: () => 'en',
       getToolDescriptors: runtime.getToolDescriptors,
+      getPromptToolDescriptors: runtime.getToolDescriptors,
       getAuthorizationDescriptors: runtime.getAuthorizationDescriptors,
       refreshToolDescriptors: runtime.refreshToolDescriptors,
       createToolAuthorization,

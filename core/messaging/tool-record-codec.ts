@@ -150,6 +150,8 @@ function isToolCardResult(value: unknown): value is Record<string, unknown> {
   if (!optionalString(value.detail) || !optionalBoolean(value.truncated)) return false;
   if (value.output !== undefined && !isJsonValue(value.output)) return false;
   if (value.error !== undefined && !isToolError(value.error)) return false;
+  if (!optionalString(value.descriptorId) || !optionalString(value.name)) return false;
+  if (value.provider !== undefined && !isToolProviderIdentity(value.provider)) return false;
   return true;
 }
 

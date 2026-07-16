@@ -37,6 +37,43 @@ export {
 } from './discovery';
 
 export {
+  MCP_CAPABILITY_OPERATION_ANNOTATION,
+  MCP_CAPABILITY_OPERATIONS,
+  MCP_CAPABILITY_TOOL_PROVIDER_ID,
+  getMcpCapabilityOperation,
+  isMcpCapabilityDescriptor,
+} from './capability-contract';
+
+export {
+  DEFAULT_MCP_CAPABILITY_SETTINGS,
+  MCP_CAPABILITY_SETTINGS_STORAGE_KEY,
+  McpCapabilitySettingsError,
+  createDefaultMcpCapabilitySettings,
+  decodeMcpCapabilitySettings,
+  getMcpCapabilityServerSettings,
+  getMcpCapabilitySettings,
+  setMcpCapabilityServerExposure,
+  updateMcpCapabilitySettings,
+} from './capability-settings';
+
+export {
+  estimateMcpCapabilityPromptBytes,
+  isExecutableMcpDescriptor,
+  isMcpDescriptor,
+  projectMcpCapabilityDescriptors,
+  rankMcpCapabilityDescriptors,
+} from './capability-projection';
+
+export {
+  MCP_CAPABILITY_TOOL_NAMES,
+  MCP_CAPABILITY_TOOL_PROVIDER,
+  createMcpCapabilityToolDescriptors,
+  executeMcpCapabilityToolCall,
+  isMcpCapabilityInvokeDescriptor,
+  parseMcpCapabilityInvocationPayload,
+} from './capability-tools';
+
+export {
   buildMcpRequestHeaders,
   clearMcpToolCache,
   createMcpServer,
@@ -78,6 +115,16 @@ export {
   readSseJsonRpcResponse,
   requestMcpServerOriginPermission,
 } from './transports';
+
+export type {
+  McpCapabilityExposureMode,
+  McpCapabilityProjection,
+  McpCapabilityServerSettings,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
+} from './capability-types';
+
+export type { McpCapabilitySettingsErrorCode } from './capability-settings';
 
 export type {
   SseEvent,

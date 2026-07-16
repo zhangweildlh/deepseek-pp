@@ -119,12 +119,19 @@ import { PendingRequestRegistry } from '../core/tool/pending-request-registry';
 import { PendingAuthorizationCorrelations } from '../core/tool/pending-authorization-correlations';
 import { shouldRequestWebFetchPermission } from '../core/tool/web-fetch-permission';
 import {
+  MCP_CAPABILITY_TOOL_PROVIDER_ID,
+  isMcpCapabilityDescriptor,
+} from '../core/mcp/capability-contract';
+import {
   BACKGROUND_RUNTIME_PATHNAMES,
   createExtensionRuntimeMessageContext,
   createRuntimeBoundaryErrorResponse,
   decodeRuntimeMessageEnvelope,
 } from '../core/messaging/runtime-boundary';
-import { isToolDescriptorRecord } from '../core/messaging/tool-record-codec';
+import {
+  isToolDescriptorRecord,
+  isToolProviderIdentity,
+} from '../core/messaging/tool-record-codec';
 import { startDeepSeekHistoryOrganizer, type HistoryOrganizerController } from './content/adapters/history-organizer';
 import { startDeepSeekProjectSidebarOrganizer, type ProjectSidebarOrganizerController } from './content/adapters/project-sidebar-organizer';
 import { startContentUxPolish, type ContentUxPolishController } from './content/adapters/ux-polish';
@@ -292,6 +299,7 @@ const activeToolBlockSessions = new Map<string, ActiveToolBlockSession>();
 const pendingExternalToolPayloadWrites = new Map<string, Promise<void>>();
 const activeToolAuthorizations = new Map<string, ToolAuthorizationGrantSummary>();
 const toolAuthorizationRequestAliases = new Map<string, string>();
+const inlineAgentAuthorizationRequestKeys = new Map<string, string>();
 const pendingToolAuthorizationCorrelations = new PendingAuthorizationCorrelations();
 const pendingToolExecutionTasksByRequest = new Map<string, Set<Promise<ToolCardResult>>>();
 const pendingStartedToolCallsByRequest = new PendingRequestRegistry<PendingStartedToolCall>();
@@ -709,6 +717,7 @@ async function stopToolCapability(): Promise<void> {
   restoredToolRecords.clear();
   activeToolAuthorizations.clear();
   toolAuthorizationRequestAliases.clear();
+  inlineAgentAuthorizationRequestKeys.clear();
   pendingExternalToolPayloadWrites.clear();
   pendingToolExecutionTasksByRequest.clear();
   restoredRenderAttempts = 0;
@@ -1104,6 +1113,7 @@ async function handleAugmentRequestBody(data: {
       requestId,
       trigger: 'manual_chat',
       chatSessionId: readRequestChatSessionId(bodyWithMultimodalMedia),
+      toolIntent: bodyWithMultimodalMedia.prompt.slice(0, 16_000),
     });
     activeToolAuthorizations.set(requestId, authorization);
     toolAuthorizationRequestAliases.set(mainRequestId, requestId);
@@ -1204,6 +1214,7 @@ async function createContentToolAuthorization(input: {
   chatSessionId: string | null;
   runId?: string;
   descriptorIds?: string[];
+  toolIntent?: string;
 }): Promise<ToolAuthorizationGrantSummary> {
   return sendRuntimeMessageStrict<ToolAuthorizationGrantSummary>({
     type: 'CREATE_TOOL_AUTHORIZATION',
@@ -1242,6 +1253,9 @@ function removeLocalToolAuthorization(requestId: string, authorizationId: string
   }
   for (const [alias, target] of toolAuthorizationRequestAliases) {
     if (target === requestId) toolAuthorizationRequestAliases.delete(alias);
+  }
+  for (const [runId, target] of inlineAgentAuthorizationRequestKeys) {
+    if (target === requestId) inlineAgentAuthorizationRequestKeys.delete(runId);
   }
 }
 
@@ -3414,9 +3428,14 @@ function startInlineAgentIfNeeded(
   if (!complete.chatSessionId || complete.assistantMessageId == null) return;
 
   const loopId = crypto.randomUUID();
+  const authorization = complete.requestId
+    ? activeToolAuthorizations.get(complete.requestId)
+    : undefined;
+  if (!authorization) return;
 
   const payload: InlineAgentStartPayload = {
     loopId,
+    capabilityScopeRequestId: complete.requestId,
     chatSessionId: complete.chatSessionId,
     parentMessageId: complete.assistantMessageId,
     originalPrompt: complete.agentTaskPrompt || complete.originalPrompt,
@@ -3428,9 +3447,10 @@ function startInlineAgentIfNeeded(
       thinkingEnabled: complete.promptOptions.thinkingEnabled,
       refFileIds: complete.promptOptions.refFileIds,
     },
-    toolDescriptors: currentToolDescriptors.filter(
+    toolDescriptors: authorization.descriptors.filter(
       (d) =>
         d.provider?.kind === 'mcp' ||
+        d.provider?.id === MCP_CAPABILITY_TOOL_PROVIDER_ID ||
         d.provider?.id === 'web' ||
         d.provider?.id === 'browser_control' ||
         d.name === 'web_search' ||
@@ -3585,17 +3605,19 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
   const abort = new AbortController();
   activeAgentAbort = abort;
 
-  const authorizationRequestId = `agent:${payload.loopId}`;
+  const authorizationRequestKey = `agent:${payload.loopId}`;
+  const capabilityScopeRequestId = payload.capabilityScopeRequestId ?? authorizationRequestKey;
   let authorization: ToolAuthorizationGrantSummary;
   try {
     authorization = await createContentToolAuthorization({
-      requestId: authorizationRequestId,
+      requestId: capabilityScopeRequestId,
       trigger: 'agent_run',
       chatSessionId: payload.chatSessionId,
       runId: payload.loopId,
       descriptorIds: payload.toolDescriptors.map((descriptor) => descriptor.id),
     });
-    activeToolAuthorizations.set(authorizationRequestId, authorization);
+    activeToolAuthorizations.set(authorizationRequestKey, authorization);
+    inlineAgentAuthorizationRequestKeys.set(payload.loopId, authorizationRequestKey);
   } catch (error) {
     handleAgentLoopError({
       loopId: payload.loopId,
@@ -3616,24 +3638,27 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
       ...call,
       source: {
         trigger: 'agent_run',
-        requestId: authorizationRequestId,
+        requestId: capabilityScopeRequestId,
         chatSessionId: payload.chatSessionId,
         runId: payload.loopId,
       },
     });
     const result = await executeToolCall(enrichedCall, authorization.id);
     return {
-      name: call.name,
+      name: result.name ?? call.name,
       result: {
         ok: result.ok,
+        name: result.name,
+        provider: result.provider,
+        descriptorId: result.descriptorId,
         summary: result.summary,
         detail: result.detail,
         output: result.output,
         error: result.error,
         truncated: result.truncated,
       },
-      provider: call.provider,
-      descriptorId: call.descriptorId,
+      provider: result.provider ?? call.provider,
+      descriptorId: result.descriptorId ?? call.descriptorId,
     };
   };
 
@@ -3643,7 +3668,7 @@ async function startInlineAgentLoop(payload: InlineAgentStartPayload): Promise<v
       toolDescriptors: authorization.descriptors,
     }, { post, executeTool, signal: abort.signal });
   } finally {
-    await closeContentToolAuthorization(authorizationRequestId);
+    await closeContentToolAuthorization(authorizationRequestKey);
     if (activeAgentAbort === abort) activeAgentAbort = null;
   }
 }
@@ -3879,7 +3904,13 @@ function runToolExecution(call: ToolCall): Promise<ToolCardResult> {
     }))
     .then((result) => {
       removePendingToolExecution(session, call);
-      const execution = { callId: call.id, name: call.name, result, provider: call.provider, descriptorId: call.descriptorId };
+      const execution = {
+        callId: call.id,
+        name: result.name ?? call.name,
+        result,
+        provider: result.provider ?? call.provider,
+        descriptorId: result.descriptorId ?? call.descriptorId,
+      };
       session.executions.push(execution);
       activeToolBlockSessionId = session.id;
       toolExecutions = session.executions;
@@ -3922,8 +3953,16 @@ function ensureToolCallId(call: ToolCall): ToolCall {
 function getToolAuthorizationForCall(
   call: ToolCall,
 ): ToolAuthorizationGrantSummary | undefined {
-  const requestId = call.source?.requestId;
-  return requestId ? activeToolAuthorizations.get(requestId) : undefined;
+  const source = call.source;
+  const requestId = source?.requestId;
+  if (!requestId) return undefined;
+  const agentRequestId = source?.trigger === 'agent_run' && source.runId
+    ? inlineAgentAuthorizationRequestKeys.get(source.runId)
+    : undefined;
+  const authoritativeRequestId = agentRequestId
+    ?? toolAuthorizationRequestAliases.get(requestId)
+    ?? (activeToolAuthorizations.has(requestId) ? requestId : undefined);
+  return authoritativeRequestId ? activeToolAuthorizations.get(authoritativeRequestId) : undefined;
 }
 
 function showPendingToolExecution(call: ToolCall): void {
@@ -4429,10 +4468,16 @@ function syncToMainWorld(
   currentPromptSettings = normalizePromptInjectionSettings(promptSettings);
   toolOpenTagRe = buildToolOpenTagRegex(toolDescriptors);
   toolMarkerRe = buildToolMarkerRegex(toolDescriptors);
+  const fallbackPromptDescriptors = toolDescriptors.filter(
+    (descriptor) => !isMcpCapabilityDescriptor(descriptor),
+  );
 
   postToMainWorld({
     type: 'SYNC_HOOK_STATE',
-    toolDescriptors,
+    // Catalog controls remain available to the content parser, but never
+    // become fallback Prompt tools. A request receives them only through its
+    // background-produced capability projection.
+    toolDescriptors: fallbackPromptDescriptors,
     skillSummaries: skills
       .filter((skill) => skill.enabled !== false)
       .map((skill) => ({ name: skill.name, description: skill.description })),
@@ -4970,7 +5015,12 @@ function getToolRecordSignature(record: ToolCallRestoreRecord): string | null {
 
 async function appendExternalToolPayloadChunk(chunk: ToolCallPayloadChunk): Promise<void> {
   const authorization = chunk.requestId
-    ? activeToolAuthorizations.get(chunk.requestId)
+    ? getToolAuthorizationForCall({
+      name: 'external_payload',
+      payload: {},
+      raw: '',
+      source: { trigger: 'manual_chat', requestId: chunk.requestId },
+    })
     : undefined;
   if (!authorization) {
     throw new Error('Externalized tool payload has no active authorization context.');
@@ -5079,8 +5129,14 @@ function normalizeRuntimeToolCallResult(value: unknown): ToolCardResult | null {
   if (!value || typeof value !== 'object') return null;
   const result = value as Partial<ToolCardResult>;
   if (typeof result.ok !== 'boolean' || typeof result.summary !== 'string') return null;
+  if (result.name !== undefined && typeof result.name !== 'string') return null;
+  if (result.descriptorId !== undefined && typeof result.descriptorId !== 'string') return null;
+  if (result.provider !== undefined && !isToolProviderIdentity(result.provider)) return null;
   return {
     ok: result.ok,
+    name: result.name,
+    provider: result.provider,
+    descriptorId: result.descriptorId,
     summary: result.summary,
     detail: result.detail,
     output: result.output,

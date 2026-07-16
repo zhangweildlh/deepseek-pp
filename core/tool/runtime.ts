@@ -4,6 +4,7 @@ import { ToolPostEffectPersistenceError } from './execution-error';
 import type {
   RuntimeToolAuthorizationContext,
   ToolCall,
+  ToolCapabilityScope,
   ToolDescriptor,
   ToolExecutionTrigger,
   ToolResult,
@@ -29,6 +30,35 @@ export interface RuntimeToolCallOptions {
   signal?: AbortSignal;
   idempotencyKey?: string;
   assertActive?: () => void;
+  /** Stable, background-owned scope for a multi-step trusted run. */
+  trustedCapabilityScopeId?: string;
+}
+
+export interface RuntimeCapabilityInvocationInput {
+  call: ToolCall;
+  descriptor: ToolDescriptor;
+  capabilityScope: ToolCapabilityScope;
+  currentDescriptors: readonly ToolDescriptor[];
+}
+
+export type RuntimeCapabilityInvocationResolution =
+  | { kind: 'target'; call: ToolCall; descriptor: ToolDescriptor }
+  | { kind: 'rejected'; result: ToolResult };
+
+/**
+ * A deliberately narrow port for proxy-style capability calls. The runtime
+ * owns normal tool authorization and provider dispatch; the injected resolver
+ * may only map an already-authorized control call to one live target.
+ */
+export interface RuntimeCapabilityInvocationResolver {
+  supports(descriptor: ToolDescriptor): boolean;
+  resolveInvocation(
+    input: RuntimeCapabilityInvocationInput,
+  ): Promise<RuntimeCapabilityInvocationResolution>;
+}
+
+export interface RuntimeToolRuntimeOptions {
+  capabilityInvocationResolver?: RuntimeCapabilityInvocationResolver;
 }
 
 export interface RuntimeToolRuntime {
@@ -45,6 +75,7 @@ export interface RuntimeToolRuntime {
 
 export function createRuntimeToolRuntime(
   providerRegistry: ToolProviderRegistry,
+  runtimeOptions: RuntimeToolRuntimeOptions = {},
 ): RuntimeToolRuntime {
   return {
     getToolDescriptors: (locale = DEFAULT_LOCALE) => getRuntimeDescriptors(
@@ -61,8 +92,15 @@ export function createRuntimeToolRuntime(
       await providerRegistry.refresh({ locale });
       return getRuntimeDescriptors(providerRegistry, locale, false);
     },
-    executeToolCall: (call, authorization, locale = DEFAULT_LOCALE, options = {}) =>
-      executeRuntimeToolCall(providerRegistry, call, authorization, locale, options),
+    executeToolCall: (call, authorization, locale = DEFAULT_LOCALE, callOptions = {}) =>
+      executeRuntimeToolCall(
+        providerRegistry,
+        call,
+        authorization,
+        locale,
+        callOptions,
+        runtimeOptions.capabilityInvocationResolver,
+      ),
   };
 }
 
@@ -83,6 +121,7 @@ async function executeRuntimeToolCall(
   authorization: RuntimeToolAuthorizationContext | ToolExecutionTrigger,
   locale: SupportedLocale = DEFAULT_LOCALE,
   options: RuntimeToolCallOptions = {},
+  capabilityInvocationResolver?: RuntimeCapabilityInvocationResolver,
 ): Promise<ToolResult> {
   assertRuntimeExecutionActive(options);
   const identifiedCall = !call.id && options.idempotencyKey
@@ -92,7 +131,7 @@ async function executeRuntimeToolCall(
     return createInvalidToolCallResult(identifiedCall, locale);
   }
   const context = typeof authorization === 'string'
-    ? createTrustedExecutionContext(identifiedCall, authorization)
+    ? createTrustedExecutionContext(identifiedCall, authorization, options.trustedCapabilityScopeId)
     : authorization;
   if (identifiedCall.parseError) {
     const result = createParseErrorToolResult(identifiedCall, locale);
@@ -100,11 +139,13 @@ async function executeRuntimeToolCall(
     return result;
   }
   let authorized: Awaited<ReturnType<typeof authorizeToolExecution>>;
+  let currentDescriptors: ToolDescriptor[];
   try {
+    currentDescriptors = await getRuntimeDescriptors(providerRegistry, locale, true);
     authorized = await authorizeToolExecution(
       identifiedCall,
       context,
-      await getRuntimeDescriptors(providerRegistry, locale, true),
+      currentDescriptors,
     );
     assertRuntimeExecutionActive(options);
   } catch (error) {
@@ -122,6 +163,7 @@ async function executeRuntimeToolCall(
 
   let result: ToolResult;
   let resolvedCall = authorized.call;
+  let executionDescriptor = authorized.descriptor;
   let providerCompleted = false;
   try {
     resolvedCall = await resolveToolCallPayload(
@@ -131,15 +173,43 @@ async function executeRuntimeToolCall(
     assertRuntimeExecutionActive(options);
     if (resolvedCall.parseError) {
       result = createParseErrorToolResult(resolvedCall, locale);
+    } else if (capabilityInvocationResolver?.supports(executionDescriptor)) {
+      const resolution = await capabilityInvocationResolver.resolveInvocation({
+        call: resolvedCall,
+        descriptor: executionDescriptor,
+        capabilityScope: createRuntimeCapabilityScope(context, resolvedCall),
+        currentDescriptors,
+      });
+      if (resolution.kind === 'rejected') {
+        result = resolution.result;
+      } else {
+        resolvedCall = resolution.call;
+        executionDescriptor = resolution.descriptor;
+        result = await providerRegistry.execute(
+          resolvedCall,
+          executionDescriptor,
+          {
+            locale,
+            signal: options.signal,
+            timeoutMs: options.timeoutMs,
+            maxResultBytes: options.maxResultBytes,
+            availableDescriptors: currentDescriptors,
+            capabilityScope: createRuntimeCapabilityScope(context, authorized.call),
+          },
+        );
+        providerCompleted = true;
+      }
     } else {
       result = await providerRegistry.execute(
         resolvedCall,
-        authorized.descriptor,
+        executionDescriptor,
         {
           locale,
           signal: options.signal,
           timeoutMs: options.timeoutMs,
           maxResultBytes: options.maxResultBytes,
+          availableDescriptors: currentDescriptors,
+          capabilityScope: createRuntimeCapabilityScope(context, authorized.call),
         },
       );
       providerCompleted = true;
@@ -306,15 +376,42 @@ function createUnsupportedToolResult(call: ToolCall, locale: SupportedLocale): T
 function createTrustedExecutionContext(
   call: ToolCall,
   trigger: ToolExecutionTrigger,
+  capabilityScopeId?: string,
 ): RuntimeToolAuthorizationContext {
   return {
     kind: 'trusted',
     trigger,
     requestId: call.source?.requestId ?? crypto.randomUUID(),
+    capabilityScopeId,
     chatSessionId: call.source?.chatSessionId ?? null,
     taskId: call.source?.taskId,
     runId: call.source?.runId,
     automationId: call.source?.automationId,
     automationRunId: call.source?.automationRunId,
+  };
+}
+
+function createRuntimeCapabilityScope(
+  context: RuntimeToolAuthorizationContext,
+  canonicalCall: ToolCall,
+): ToolCapabilityScope {
+  if (context.kind === 'grant') {
+    const source = canonicalCall.source;
+    if (!source?.requestId) {
+      throw new Error('Granted capability scope is missing its authorized request identity.');
+    }
+    return {
+      kind: 'grant',
+      scopeId: source.requestId,
+      trigger: source.trigger,
+      chatSessionId: source.chatSessionId ?? null,
+      subject: { ...context.subject },
+    };
+  }
+  return {
+    kind: 'trusted',
+    scopeId: context.capabilityScopeId ?? context.requestId,
+    trigger: context.trigger,
+    chatSessionId: context.chatSessionId ?? null,
   };
 }

@@ -11,10 +11,22 @@ import type {
   McpServerUpdateInput,
   McpToolCacheEntry,
 } from '../../core/mcp/types';
+import type {
+  McpCapabilityExposureMode,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
+} from '../../core/mcp/capability-types';
 import { defineToolPayloadRuntimeCommandHandler } from './runtime-handler';
 
 export interface McpRuntimeHandlerDependencies {
   getAllMcpServers(): Promise<McpServerConfig[]>;
+  getMcpCapabilitySettings(): Promise<McpCapabilitySettings>;
+  updateMcpCapabilitySettings(patch: McpCapabilitySettingsPatch): Promise<McpCapabilitySettings>;
+  setMcpCapabilityServerExposure(input: {
+    serverId: string;
+    mode: McpCapabilityExposureMode;
+    pinnedDescriptorIds?: readonly string[];
+  }): Promise<McpCapabilitySettings>;
   getMcpServerById(id: string): Promise<McpServerConfig | null>;
   createMcpServer(input: McpServerCreateInput): Promise<McpServerConfig>;
   updateMcpServer(id: string, patch: McpServerUpdateInput): Promise<McpServerConfig | null>;
@@ -39,6 +51,19 @@ export function createMcpRuntimeHandlers(
     definePayloadlessRuntimeCommandHandler('GET_MCP_SERVERS', () => (
       dependencies.getAllMcpServers()
     )),
+    definePayloadlessRuntimeCommandHandler('GET_MCP_CAPABILITY_SETTINGS', () => (
+      dependencies.getMcpCapabilitySettings()
+    )),
+    defineToolPayloadRuntimeCommandHandler('UPDATE_MCP_CAPABILITY_SETTINGS', async (payload, context) => {
+      const settings = await dependencies.updateMcpCapabilitySettings(payload);
+      await notifyMcpAndTools(context.tabId);
+      return settings;
+    }),
+    defineToolPayloadRuntimeCommandHandler('SET_MCP_CAPABILITY_SERVER_EXPOSURE', async (payload, context) => {
+      const settings = await dependencies.setMcpCapabilityServerExposure(payload);
+      await notifyMcpAndTools(context.tabId);
+      return settings;
+    }),
     defineToolPayloadRuntimeCommandHandler('GET_MCP_SERVER', (payload) => (
       dependencies.getMcpServerById(payload.id)
     )),

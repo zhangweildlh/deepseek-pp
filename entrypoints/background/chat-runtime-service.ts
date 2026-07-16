@@ -111,6 +111,7 @@ export interface ChatRuntimeService {
 
 interface ActiveChatTurn {
   generation: number;
+  capabilityScopeId: string;
   controller: AbortController;
   settled: Promise<void>;
   terminal?: { chunk: ChatStreamChunk; excludeTabId?: number };
@@ -182,15 +183,21 @@ export function createChatRuntimeService(
     const result = await dependencies.executeToolCall(call, {
       signal: turn.controller.signal,
       assertActive: () => assertTurnActive(turn),
+      trustedCapabilityScopeId: turn.capabilityScopeId,
     });
     assertTurnActive(turn);
     if (!result.ok && result.error?.details?.externalOutcome === 'ambiguous') {
       throw new Error(result.error.message || result.detail || result.summary);
     }
     return {
-      name: call.name,
+      name: result.name ?? call.name,
+      provider: result.provider ?? call.provider,
+      descriptorId: result.descriptorId ?? call.descriptorId,
       result: {
         ok: result.ok,
+        name: result.name,
+        provider: result.provider,
+        descriptorId: result.descriptorId,
         summary: result.summary,
         detail: result.detail,
         output: result.output,
@@ -485,6 +492,7 @@ export function createChatRuntimeService(
 
     const turn: ActiveChatTurn = {
       generation,
+      capabilityScopeId: crypto.randomUUID(),
       controller: new AbortController(),
       settled: Promise.resolve(),
     };

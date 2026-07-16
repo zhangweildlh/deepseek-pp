@@ -46,6 +46,12 @@ import {
 } from '../../core/tool/web-search';
 import { getWebToolSettings } from '../../core/tool/web-settings';
 import {
+  MCP_CAPABILITY_TOOL_PROVIDER,
+  createMcpCapabilityToolDescriptors,
+  disambiguateMcpCapabilityToolDescriptors,
+  executeMcpCapabilityToolCall,
+} from '../../core/mcp/capability-tools';
+import {
   ToolProviderRegistry,
   type RuntimeToolProvider,
   type ToolProviderDescriptorContext,
@@ -113,6 +119,7 @@ export function createProductionToolProviderRegistry(): ToolProviderRegistry {
       },
       (call, _descriptor, { locale }) => executeBrowserControlToolCall(call, locale),
     ),
+    createMcpCapabilityProvider(),
     createMcpProvider(),
   ]);
 }
@@ -156,6 +163,17 @@ function createMcpProvider(): RuntimeToolProvider {
         maxResultBytes: options.maxResultBytes,
       });
     },
+  };
+}
+
+function createMcpCapabilityProvider(): RuntimeToolProvider {
+  return {
+    ...createLocalProvider(
+      MCP_CAPABILITY_TOOL_PROVIDER.id,
+      ({ locale }) => createMcpCapabilityToolDescriptors(locale),
+      executeMcpCapabilityToolCall,
+    ),
+    disambiguateInvocationNames: disambiguateMcpCapabilityToolDescriptors,
   };
 }
 

@@ -3,6 +3,7 @@ import {
   MULTIMODAL_MCP_SERVER_NAME,
   createMultimodalMcpPresetInput,
 } from '../../../core/multimodal';
+import { decodeMcpCapabilitySettings } from '../../../core/mcp/capability-settings';
 import { decodeMcpStorageState, MCP_STORAGE_VERSION } from '../../../core/mcp/storage-codec';
 import {
   getSupportedMcpTransportKinds,
@@ -17,6 +18,9 @@ import { decodeToolCallHistory } from '../../../core/tool/history-codec';
 import type { WebSearchToolName } from '../../../core/tool/web-search';
 import type { WebToolSettings } from '../../../core/tool/web-settings';
 import type {
+  McpCapabilityExposureMode,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
   McpServerConfig,
   McpServerCreateInput,
   McpServerTransportConfig,
@@ -39,6 +43,7 @@ export interface McpSnapshot {
   caches: Record<string, McpToolCacheEntry | null>;
   history: ToolCallHistoryRecord[];
   platform: PlatformEnvironment;
+  capabilitySettings: McpCapabilitySettings;
 }
 
 export interface McpPermissionResult {
@@ -54,6 +59,12 @@ export interface McpToolsController {
   createServer(payload: McpServerCreateInput): Promise<McpServerConfig>;
   updateServer(server: McpServerConfig, patch: Partial<McpServerConfig>): Promise<McpServerConfig | null>;
   deleteServer(id: string): Promise<void>;
+  updateCapabilitySettings(patch: McpCapabilitySettingsPatch): Promise<McpCapabilitySettings>;
+  setServerExposure(input: {
+    serverId: string;
+    mode: McpCapabilityExposureMode;
+    pinnedDescriptorIds?: readonly string[];
+  }): Promise<McpCapabilitySettings>;
   requestServerPermission(serverId: string): Promise<McpPermissionResult>;
   connectServer(server: McpServerConfig, action: McpConnectionAction): Promise<McpToolCacheEntry>;
   getWebToolSettings(): Promise<WebToolSettings>;
@@ -92,7 +103,7 @@ export function createMcpToolsController(
   const controller: McpToolsController = {
     async loadMcpSnapshot() {
       const { servers, platform } = await loadMcpServerState();
-      const [cacheEntries, history] = await Promise.all([
+      const [cacheEntries, history, capabilitySettings] = await Promise.all([
         Promise.all(servers.map(async (server) => (
           [server.id, await getToolCache(server)] as const
         ))),
@@ -100,12 +111,17 @@ export function createMcpToolsController(
           { type: 'GET_TOOL_CALL_HISTORY', payload: { limit: 12 } },
           { decode: (value) => decodeToolCallHistory(value, 'GET_TOOL_CALL_HISTORY response') },
         ),
+        runtimeClient.request(
+          { type: 'GET_MCP_CAPABILITY_SETTINGS' },
+          { decode: decodeMcpCapabilitySettings },
+        ),
       ]);
       return {
         servers,
         platform,
         caches: Object.fromEntries(cacheEntries),
         history,
+        capabilitySettings,
       };
     },
     loadMcpServerState,
@@ -124,6 +140,23 @@ export function createMcpToolsController(
         { decode: decodeAck },
       );
     },
+    updateCapabilitySettings: (patch) => runtimeClient.request(
+      { type: 'UPDATE_MCP_CAPABILITY_SETTINGS', payload: patch },
+      { decode: decodeMcpCapabilitySettings },
+    ),
+    setServerExposure: ({ serverId, mode, pinnedDescriptorIds }) => runtimeClient.request(
+      {
+        type: 'SET_MCP_CAPABILITY_SERVER_EXPOSURE',
+        payload: {
+          serverId,
+          mode,
+          ...(pinnedDescriptorIds === undefined
+            ? {}
+            : { pinnedDescriptorIds: [...pinnedDescriptorIds] }),
+        },
+      },
+      { decode: decodeMcpCapabilitySettings },
+    ),
     requestServerPermission: (serverId) => runtimeClient.request(
       { type: 'REQUEST_MCP_SERVER_PERMISSION', payload: { serverId } },
       { acceptFailure: true, decode: decodeMcpPermissionResult },

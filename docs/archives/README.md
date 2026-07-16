@@ -98,3 +98,14 @@
 - GitHub milestones: #43-#48
 - GitHub issues: #311-#336, #345, #351-#380
 - Final batch PR: #394
+
+### pc-runtime-hardening-wave-2
+
+- Description: PC-only runtime hardening Wave 2 covering MCP decoding/resource budgets, strict request decoding, tool-stream terminal states, platform truth, Shell catalog/version truth, Side Panel first-chat budget and compatibility closure.
+- Date range: 2026-07-14 - 2026-07-14
+- Tracking mode: GITHUB_STANDARD
+- Archived progress: [MASTER.md](pc-runtime-hardening-wave-2/progress/MASTER.md)
+- GitHub repository: `zhu1090093659/deepseek-pp`
+- GitHub milestones: #49-#50
+- GitHub issues: #395-#401
+- Final batch PR: #402

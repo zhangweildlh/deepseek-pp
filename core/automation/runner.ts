@@ -11,6 +11,7 @@ import {
 } from '../deepseek/errors';
 import { extractToolCalls } from '../interceptor/tool-parser';
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
+import { MCP_CAPABILITY_TOOL_PROVIDER_ID } from '../mcp/capability-contract';
 import { buildPromptAugmentation } from '../prompt';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../tool';
 import { clampText, createToolExecutionRecord, runToolContinuationLoop } from '../tool-loop/engine';
@@ -267,7 +268,11 @@ async function runAutomationToolLoop(
     getParentMessageId: (turn) => turn.responseMessageId,
     extractToolCalls: (text) => extractToolCalls(text, {
       descriptors: request.promptContext?.toolDescriptors ?? DEFAULT_TOOL_DESCRIPTORS,
-    }).filter((call) => call.provider?.kind === 'mcp' || call.provider?.id === 'web'),
+    }).filter((call) => (
+      call.provider?.kind === 'mcp' ||
+      call.provider?.id === MCP_CAPABILITY_TOOL_PROVIDER_ID ||
+      call.provider?.id === 'web'
+    )),
     async executeToolCall(call, parentMessageId, position) {
       const idempotencyKey = options.execution?.createIdempotencyKey(
         `tool:${parentMessageId}:${position.depth}:${position.callIndex}`,

@@ -4,6 +4,9 @@ import type {
   McpToolCacheEntry,
 } from '../mcp/types';
 import type {
+  McpCapabilitySettings,
+} from '../mcp/capability-types';
+import type {
   BrowserControlSettings,
   BrowserControlState,
   BrowserControlTarget,
@@ -55,6 +58,18 @@ export interface ToolRuntimeCommandContracts {
   GET_MCP_SERVERS: {
     request: DeclaredRuntimeRequest<'GET_MCP_SERVERS'>;
     response: McpServerConfig[];
+  };
+  GET_MCP_CAPABILITY_SETTINGS: {
+    request: DeclaredRuntimeRequest<'GET_MCP_CAPABILITY_SETTINGS'>;
+    response: McpCapabilitySettings;
+  };
+  UPDATE_MCP_CAPABILITY_SETTINGS: {
+    request: DeclaredRuntimeRequest<'UPDATE_MCP_CAPABILITY_SETTINGS'>;
+    response: McpCapabilitySettings;
+  };
+  SET_MCP_CAPABILITY_SERVER_EXPOSURE: {
+    request: DeclaredRuntimeRequest<'SET_MCP_CAPABILITY_SERVER_EXPOSURE'>;
+    response: McpCapabilitySettings;
   };
   GET_MCP_SERVER: {
     request: DeclaredRuntimeRequest<'GET_MCP_SERVER'>;

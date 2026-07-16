@@ -5,6 +5,7 @@ export type {
   ToolCallHistoryRecord,
   ToolCallId,
   ToolCallSource,
+  ToolCapabilityScope,
   ToolAuthorizationDescriptorSnapshot,
   ToolAuthorizationGrantSummary,
   ToolAuthorizationId,
@@ -53,7 +54,11 @@ export {
 export {
   createRuntimeToolRuntime,
   type RuntimeToolCallOptions,
+  type RuntimeCapabilityInvocationInput,
+  type RuntimeCapabilityInvocationResolution,
+  type RuntimeCapabilityInvocationResolver,
   type RuntimeToolRuntime,
+  type RuntimeToolRuntimeOptions,
 } from './runtime';
 
 export {

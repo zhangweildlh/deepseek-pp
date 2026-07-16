@@ -12,8 +12,10 @@ import {
   type RuntimeCommandHandler,
 } from '../core/messaging/runtime-command-registry';
 import { TOOL_RUNTIME_PAYLOAD_DECODERS } from '../core/messaging/tool-runtime-request-codec';
+import type { McpCapabilitySettings } from '../core/mcp/capability-types';
 import type { McpServerConfig, McpToolCacheEntry } from '../core/mcp/types';
 import { createCapabilityMap, type PlatformEnvironment } from '../core/platform/capabilities';
+import { createMcpCapabilityToolDescriptors } from '../core/mcp/capability-tools';
 import { ToolAuthorizationError } from '../core/tool/authorization';
 import type {
   RuntimeToolAuthorizationContext,
@@ -33,6 +35,7 @@ import {
 } from '../entrypoints/background/mcp-handlers';
 import {
   createToolAuthorizationSubject,
+  createTrustedToolExecutionContext,
   createToolExecutionRuntimeHandlers,
   type ToolExecutionRuntimeHandlerDependencies,
 } from '../entrypoints/background/tool-execution-handlers';
@@ -88,7 +91,7 @@ const call: ToolCall = {
 };
 
 describe('R4.2 tool runtime handler ownership', () => {
-  it('creates exactly the 29 inventory-assigned handlers without duplicate ownership', () => {
+  it('creates exactly the 32 inventory-assigned handlers without duplicate ownership', () => {
     const handlers = createToolRuntimeHandlers({
       mcp: createMcpDependencies(),
       browser: createBrowserDependencies(),
@@ -96,11 +99,11 @@ describe('R4.2 tool runtime handler ownership', () => {
     });
     const types = handlers.map((handler) => handler.type);
     const expected = readInventoryCommands(
-      'R4.2 / #361 — MCP, tool, browser control, and sandbox (29)',
+      'R4.2 / #361 — MCP, tool, browser control, and sandbox (32)',
     );
 
-    expect(types).toHaveLength(29);
-    expect(new Set(types).size).toBe(29);
+    expect(types).toHaveLength(32);
+    expect(new Set(types).size).toBe(32);
     expect([...types].sort()).toEqual([...expected].sort());
     for (const type of types) expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
 
@@ -110,7 +113,7 @@ describe('R4.2 tool runtime handler ownership', () => {
       .filter((type) => expected.includes(type))
       .sort();
     expect(Object.keys(TOOL_RUNTIME_PAYLOAD_DECODERS).sort()).toEqual(decodedTypes);
-    expect(decodedTypes).toHaveLength(20);
+    expect(decodedTypes).toHaveLength(22);
   });
 
   it('rejects malformed nested MCP input before persistence or external I/O', async () => {
@@ -469,6 +472,47 @@ describe('tool execution runtime handlers', () => {
     );
   });
 
+  it('keeps catalog controls available to the content parser while authorizing them only through a prompt projection', async () => {
+    const dependencies = createExecutionDependencies();
+    const [discover] = createMcpCapabilityToolDescriptors('en');
+    vi.mocked(dependencies.getToolDescriptors).mockResolvedValue([descriptor, discover]);
+    vi.mocked(dependencies.getPromptToolDescriptors).mockResolvedValue([descriptor, discover]);
+    const handlers = createToolExecutionRuntimeHandlers(dependencies);
+
+    await expect(dispatch(handlers, { type: 'GET_TOOL_DESCRIPTORS' }))
+      .resolves.toEqual([descriptor, discover]);
+
+    await dispatch(handlers, {
+      type: 'CREATE_TOOL_AUTHORIZATION',
+      payload: {
+        requestId: 'request-projected',
+        trigger: 'manual_chat',
+        chatSessionId: 'chat-1',
+        toolIntent: 'discover a workspace capability',
+      },
+    }, deepSeekContext);
+    expect(dependencies.getPromptToolDescriptors).toHaveBeenCalledWith(
+      'en',
+      'discover a workspace capability',
+    );
+    expect(dependencies.createToolAuthorization).toHaveBeenLastCalledWith(
+      expect.objectContaining({ descriptors: [descriptor, discover] }),
+    );
+
+    await dispatch(handlers, {
+      type: 'CREATE_TOOL_AUTHORIZATION',
+      payload: {
+        requestId: 'request-catalog-continuation',
+        trigger: 'agent_run',
+        chatSessionId: 'chat-1',
+        descriptorIds: [discover.id],
+      },
+    }, deepSeekContext);
+    expect(dependencies.createToolAuthorization).toHaveBeenLastCalledWith(
+      expect.objectContaining({ descriptors: [discover] }),
+    );
+  });
+
   it('keeps Firefox grant identity stable when MessageSender.documentId is unavailable', () => {
     const subject = createToolAuthorizationSubject({
       ...deepSeekContext,
@@ -482,6 +526,20 @@ describe('tool execution runtime handlers', () => {
       tabId: 7,
       frameId: 0,
       chatSessionId: 'chat-1',
+    });
+  });
+
+  it('keeps trusted request correlation separate from a stable capability scope', () => {
+    expect(createTrustedToolExecutionContext(
+      call,
+      'automation',
+      () => 'generated-request-id',
+      'automation:run-1:attempt-1',
+    )).toMatchObject({
+      kind: 'trusted',
+      trigger: 'automation',
+      requestId: 'request-1',
+      capabilityScopeId: 'automation:run-1:attempt-1',
     });
   });
 
@@ -728,6 +786,9 @@ describe('tool execution runtime handlers', () => {
 function createMcpDependencies(): McpRuntimeHandlerDependencies {
   return {
     getAllMcpServers: vi.fn(async () => []),
+    getMcpCapabilitySettings: vi.fn(async () => createMcpCapabilitySettings()),
+    updateMcpCapabilitySettings: vi.fn(async () => createMcpCapabilitySettings()),
+    setMcpCapabilityServerExposure: vi.fn(async () => createMcpCapabilitySettings()),
     getMcpServerById: vi.fn(async () => createMcpServer()),
     createMcpServer: vi.fn(async () => createMcpServer()),
     updateMcpServer: vi.fn(async () => createMcpServer()),
@@ -770,6 +831,7 @@ function createExecutionDependencies(): ToolExecutionRuntimeHandlerDependencies 
   return {
     getLocale: vi.fn(() => 'en' as const),
     getToolDescriptors: vi.fn(async () => [descriptor]),
+    getPromptToolDescriptors: vi.fn(async () => [descriptor]),
     getAuthorizationDescriptors: vi.fn(async () => [descriptor]),
     refreshToolDescriptors: vi.fn(async () => [descriptor]),
     createToolAuthorization: vi.fn(async () => grant),
@@ -816,6 +878,18 @@ function createExecutionDependencies(): ToolExecutionRuntimeHandlerDependencies 
     broadcastToolDescriptorsUpdate: vi.fn(async () => undefined),
     broadcastMcpServersUpdate: vi.fn(async () => undefined),
     broadcastToolCallHistoryUpdate: vi.fn(async () => undefined),
+  };
+}
+
+function createMcpCapabilitySettings(
+  overrides: Partial<McpCapabilitySettings> = {},
+): McpCapabilitySettings {
+  return {
+    version: 1,
+    adaptiveMaxDirectTools: 8,
+    adaptiveMaxPromptBytes: 24_000,
+    servers: {},
+    ...overrides,
   };
 }
 

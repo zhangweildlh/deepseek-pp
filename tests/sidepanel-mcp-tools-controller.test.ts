@@ -21,6 +21,7 @@ describe('sidepanel MCP and Tools controller', () => {
       if (request.type === 'GET_PLATFORM_CAPABILITIES') return platform;
       if (request.type === 'GET_MCP_TOOL_CACHE') return null;
       if (request.type === 'GET_TOOL_CALL_HISTORY') return [];
+      if (request.type === 'GET_MCP_CAPABILITY_SETTINGS') return capabilitySettings;
       throw new Error(`Unexpected command: ${request.type}`);
     }));
 
@@ -29,13 +30,65 @@ describe('sidepanel MCP and Tools controller', () => {
       caches: { 'server-1': null },
       history: [],
       platform,
+      capabilitySettings,
     });
     expect(requests).toEqual(expect.arrayContaining([
       { type: 'GET_MCP_SERVERS' },
       { type: 'GET_PLATFORM_CAPABILITIES' },
       { type: 'GET_MCP_TOOL_CACHE', payload: { serverId: 'server-1' } },
       { type: 'GET_TOOL_CALL_HISTORY', payload: { limit: 12 } },
+      { type: 'GET_MCP_CAPABILITY_SETTINGS' },
     ]));
+  });
+
+  it('uses the typed capability exposure setting command and preserves a copied pin list', async () => {
+    const sendMessage = vi.fn(async (request: { type: string; payload?: unknown }) => {
+      if (request.type === 'SET_MCP_CAPABILITY_SERVER_EXPOSURE') return {
+        ...capabilitySettings,
+        servers: {
+          'server-1': { mode: 'adaptive', pinnedDescriptorIds: ['tool-1'] },
+        },
+      };
+      throw new Error(`Unexpected command: ${request.type}`);
+    });
+    const controller = createMcpToolsController(createSidepanelRuntimeClient(sendMessage));
+    const pins = ['tool-1'] as const;
+
+    await expect(controller.setServerExposure({
+      serverId: 'server-1',
+      mode: 'adaptive',
+      pinnedDescriptorIds: pins,
+    })).resolves.toMatchObject({
+      servers: { 'server-1': { mode: 'adaptive', pinnedDescriptorIds: ['tool-1'] } },
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'SET_MCP_CAPABILITY_SERVER_EXPOSURE',
+      payload: { serverId: 'server-1', mode: 'adaptive', pinnedDescriptorIds: ['tool-1'] },
+    });
+  });
+
+  it('updates the shared adaptive prompt budget through the typed settings command', async () => {
+    const sendMessage = vi.fn(async (request: { type: string; payload?: unknown }) => {
+      if (request.type === 'UPDATE_MCP_CAPABILITY_SETTINGS') return {
+        ...capabilitySettings,
+        adaptiveMaxDirectTools: 12,
+        adaptiveMaxPromptBytes: 48_000,
+      };
+      throw new Error(`Unexpected command: ${request.type}`);
+    });
+    const controller = createMcpToolsController(createSidepanelRuntimeClient(sendMessage));
+
+    await expect(controller.updateCapabilitySettings({
+      adaptiveMaxDirectTools: 12,
+      adaptiveMaxPromptBytes: 48_000,
+    })).resolves.toMatchObject({
+      adaptiveMaxDirectTools: 12,
+      adaptiveMaxPromptBytes: 48_000,
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'UPDATE_MCP_CAPABILITY_SETTINGS',
+      payload: { adaptiveMaxDirectTools: 12, adaptiveMaxPromptBytes: 48_000 },
+    });
   });
 
   it('owns permission-before-connect policy and does not retry after denial', async () => {
@@ -121,4 +174,11 @@ const platform = {
   kind: 'browser_extension',
   name: 'WebExtension',
   capabilities: { nativeMessaging: true },
+};
+
+const capabilitySettings = {
+  version: 1,
+  adaptiveMaxDirectTools: 8,
+  adaptiveMaxPromptBytes: 24_000,
+  servers: {},
 };

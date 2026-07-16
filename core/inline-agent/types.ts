@@ -3,6 +3,8 @@ import type { SupportedLocale } from '../i18n';
 
 export interface InlineAgentStartPayload {
   loopId: string;
+  /** Stable scope inherited from the user turn that exposed capability handles. */
+  capabilityScopeRequestId?: string;
   chatSessionId: string;
   parentMessageId: number;
   originalPrompt: string;

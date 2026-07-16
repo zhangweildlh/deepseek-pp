@@ -111,7 +111,7 @@ export async function createToolAuthorization(
     automationId: input.automationId,
     automationRunId: input.automationRunId,
     subject: cloneSubject(input.subject),
-    descriptors: await Promise.all(descriptors.map(createDescriptorSnapshot)),
+    descriptors: await Promise.all(descriptors.map(createToolAuthorizationDescriptorSnapshot)),
     calls: {},
     issuedAt: now,
     expiresAt: now + TOOL_AUTHORIZATION_TTL_MS,
@@ -417,7 +417,7 @@ async function requireCurrentDescriptor(
   if (
     !descriptor ||
     !isExecutableDescriptor(descriptor) ||
-    !await descriptorMatchesSnapshot(descriptor, snapshot)
+    !await toolDescriptorMatchesAuthorizationSnapshot(descriptor, snapshot)
   ) {
     throw new ToolAuthorizationError(
       'tool_authorization_stale',
@@ -502,7 +502,7 @@ function canonicalizeCall(
   };
 }
 
-async function createDescriptorSnapshot(
+export async function createToolAuthorizationDescriptorSnapshot(
   descriptor: ToolDescriptor,
 ): Promise<ToolAuthorizationDescriptorSnapshot> {
   return {
@@ -519,7 +519,7 @@ async function createDescriptorSnapshot(
   };
 }
 
-async function descriptorMatchesSnapshot(
+export async function toolDescriptorMatchesAuthorizationSnapshot(
   descriptor: ToolDescriptor,
   snapshot: ToolAuthorizationDescriptorSnapshot,
 ): Promise<boolean> {
@@ -535,7 +535,10 @@ export async function haveEquivalentToolDescriptorSecurity(
   left: ToolDescriptor,
   right: ToolDescriptor,
 ): Promise<boolean> {
-  return descriptorMatchesSnapshot(right, await createDescriptorSnapshot(left));
+  return toolDescriptorMatchesAuthorizationSnapshot(
+    right,
+    await createToolAuthorizationDescriptorSnapshot(left),
+  );
 }
 
 function providerMatches(
@@ -749,7 +752,7 @@ function isStoredGrant(id: string, value: unknown): value is StoredToolAuthoriza
     isStoredSubject(grant.subject) &&
     hasValidStoredGrantSessionBinding(grant.chatSessionId, grant.subject) &&
     Array.isArray(grant.descriptors) &&
-    grant.descriptors.every(isStoredDescriptorSnapshot) &&
+    grant.descriptors.every(isToolAuthorizationDescriptorSnapshotRecord) &&
     hasUniqueStoredDescriptorIds(grant.descriptors) &&
     isPlainRecord(grant.calls) &&
     Object.keys(grant.calls).length <= MAX_CALLS_PER_GRANT &&
@@ -797,7 +800,9 @@ function hasValidStoredCalls(
     isStoredCall(callId, call, descriptorIds));
 }
 
-function isStoredDescriptorSnapshot(value: unknown): value is ToolAuthorizationDescriptorSnapshot {
+export function isToolAuthorizationDescriptorSnapshotRecord(
+  value: unknown,
+): value is ToolAuthorizationDescriptorSnapshot {
   if (!isPlainRecord(value) || !isPlainRecord(value.provider) || !isPlainRecord(value.execution)) return false;
   const snapshot = value as unknown as ToolAuthorizationDescriptorSnapshot;
   return hasOnlyKeys(value, ['id', 'provider', 'name', 'invocationName', 'execution', 'inputSchemaDigest']) &&

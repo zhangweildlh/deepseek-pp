@@ -4,6 +4,11 @@ import type {
   McpServerUpdateInput,
 } from './mcp/types';
 import type {
+  McpCapabilityExposureMode,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
+} from './mcp/capability-types';
+import type {
   CurrentDeepSeekConversation,
   ProjectContextCreateInput,
   ProjectContextState,
@@ -56,11 +61,20 @@ export type {
 } from './mcp/types';
 
 export type {
+  McpCapabilityExposureMode,
+  McpCapabilityProjection,
+  McpCapabilityServerSettings,
+  McpCapabilitySettings,
+  McpCapabilitySettingsPatch,
+} from './mcp/capability-types';
+
+export type {
   JsonPrimitive,
   JsonValue,
   ToolCallId,
   ToolCallHistoryRecord,
   ToolCallSource,
+  ToolCapabilityScope,
   ToolAuthorizationDescriptorSnapshot,
   ToolAuthorizationGrantSummary,
   ToolAuthorizationId,
@@ -480,7 +494,10 @@ export interface SkillInvocation {
 
 export interface ToolCall extends GenericToolCall {}
 
-export interface ToolCardResult extends Pick<GenericToolResult, 'ok' | 'summary' | 'detail' | 'output' | 'truncated' | 'error'> {}
+export interface ToolCardResult extends Pick<
+  GenericToolResult,
+  'ok' | 'summary' | 'detail' | 'output' | 'truncated' | 'error' | 'descriptorId' | 'provider' | 'name'
+> {}
 
 export interface ToolExecutionRecord {
   callId?: string;
@@ -566,6 +583,16 @@ export type MessageAction =
   | { type: 'SAVE_VOICE_SETTINGS'; payload: Partial<VoiceSettingsType> }
   | { type: 'GET_VOICE_CAPABILITIES' }
   | { type: 'GET_MCP_SERVERS' }
+  | { type: 'GET_MCP_CAPABILITY_SETTINGS' }
+  | { type: 'UPDATE_MCP_CAPABILITY_SETTINGS'; payload: McpCapabilitySettingsPatch }
+  | {
+    type: 'SET_MCP_CAPABILITY_SERVER_EXPOSURE';
+    payload: {
+      serverId: McpServerId;
+      mode: McpCapabilityExposureMode;
+      pinnedDescriptorIds?: string[];
+    };
+  }
   | { type: 'GET_MCP_SERVER'; payload: { id: McpServerId } }
   | { type: 'CREATE_MCP_SERVER'; payload: McpServerCreateInput }
   | { type: 'UPDATE_MCP_SERVER'; payload: { id: McpServerId; patch: McpServerUpdateInput } }
@@ -578,7 +605,17 @@ export type MessageAction =
   | { type: 'ANALYZE_MULTIMODAL_MEDIA'; payload: MultimodalMediaAnalyzeRequestType }
   | { type: 'GET_TOOL_DESCRIPTORS' }
   | { type: 'REFRESH_TOOL_DESCRIPTORS' }
-  | { type: 'CREATE_TOOL_AUTHORIZATION'; payload: { requestId: string; trigger: 'manual_chat' | 'agent_run'; chatSessionId: string | null; runId?: string; descriptorIds?: string[] } }
+  | {
+    type: 'CREATE_TOOL_AUTHORIZATION';
+    payload: {
+      requestId: string;
+      trigger: 'manual_chat' | 'agent_run';
+      chatSessionId: string | null;
+      runId?: string;
+      descriptorIds?: string[];
+      toolIntent?: string;
+    };
+  }
   | { type: 'CLOSE_TOOL_AUTHORIZATION'; payload: { authorizationId: string } }
   | { type: 'APPEND_EXTERNAL_TOOL_PAYLOAD_CHUNK'; payload: { authorizationId: string; callId: string; invocationName: string; chunk: string } }
   | { type: 'EXECUTE_TOOL_CALL'; payload: ToolCall & { authorizationId?: string } }

@@ -68,6 +68,13 @@ import {
   type RuntimeToolCallOptions,
 } from '../core/tool/runtime';
 import { createProductionToolProviderRegistry } from './background/tool-provider-composition';
+import { createMcpCapabilityInvocationResolver } from '../core/mcp/capability-runtime';
+import {
+  getMcpCapabilitySettings,
+  setMcpCapabilityServerExposure,
+  updateMcpCapabilitySettings,
+} from '../core/mcp/capability-settings';
+import { projectMcpCapabilityDescriptors } from '../core/mcp/capability-projection';
 import {
   authorizeExternalToolPayloadChunk,
   closeToolAuthorization,
@@ -283,7 +290,9 @@ const {
   getAuthorizationDescriptors: getRuntimeAuthorizationDescriptors,
   getToolDescriptors: getRuntimeToolDescriptors,
   refreshToolDescriptors: refreshRuntimeToolDescriptors,
-} = createRuntimeToolRuntime(createProductionToolProviderRegistry());
+} = createRuntimeToolRuntime(createProductionToolProviderRegistry(), {
+  capabilityInvocationResolver: createMcpCapabilityInvocationResolver(),
+});
 let currentBackgroundLocale: SupportedLocale = DEFAULT_LOCALE;
 let currentBackgroundTranslator = createTranslator(DEFAULT_LOCALE);
 let sandboxOffscreenCreation: Promise<void> | null = null;
@@ -478,6 +487,9 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
     ...createToolRuntimeHandlers({
       mcp: {
         getAllMcpServers,
+        getMcpCapabilitySettings,
+        updateMcpCapabilitySettings,
+        setMcpCapabilityServerExposure,
         getMcpServerById,
         createMcpServer,
         updateMcpServer,
@@ -506,6 +518,7 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
       execution: {
         getLocale: () => currentBackgroundLocale,
         getToolDescriptors: getRuntimeToolDescriptors,
+        getPromptToolDescriptors: getPromptToolDescriptors,
         getAuthorizationDescriptors: getRuntimeAuthorizationDescriptors,
         refreshToolDescriptors: refreshRuntimeToolDescriptors,
         createToolAuthorization,
@@ -1128,10 +1141,26 @@ async function executeBackgroundRuntimeToolCall(
 ): Promise<ToolResult> {
   return executeRuntimeToolCall(
     call,
-    createTrustedToolExecutionContext(call, source),
+    createTrustedToolExecutionContext(
+      call,
+      source,
+      undefined,
+      options?.trustedCapabilityScopeId,
+    ),
     currentBackgroundLocale,
     options,
   );
+}
+
+async function getPromptToolDescriptors(
+  locale: SupportedLocale,
+  intent: string,
+): Promise<ToolDescriptor[]> {
+  const [descriptors, settings] = await Promise.all([
+    getRuntimeToolDescriptors(locale),
+    getMcpCapabilitySettings(),
+  ]);
+  return projectMcpCapabilityDescriptors({ descriptors, settings, intent }).descriptors;
 }
 
 async function runBrowserSandboxToolResult(request: SandboxRunRequest): Promise<ToolResult> {
@@ -1307,7 +1336,11 @@ async function executeAutomationWithContext(
     getActivePreset(),
     getRuntimeToolDescriptors(currentBackgroundLocale),
   ]);
-  const enabledDescriptors = toolDescriptors.filter((descriptor) => descriptor.execution.enabled);
+  const enabledDescriptors = projectMcpCapabilityDescriptors({
+    descriptors: toolDescriptors.filter((descriptor) => descriptor.execution.enabled),
+    settings: await getMcpCapabilitySettings(),
+    intent: request.prompt,
+  }).descriptors;
   const [project, projectPromptContext] = request.chatSessionId
     ? await Promise.all([
       getProjectForConversation(request.chatSessionId),
@@ -1348,6 +1381,7 @@ async function executeAutomationWithContext(
         signal: toolExecution.signal,
         idempotencyKey: toolExecution.idempotencyKey,
         assertActive: () => execution.assertActive(),
+        trustedCapabilityScopeId: `automation:${execution.runId}:${execution.attempt}`,
       },
     ),
     clientHeaders,
@@ -1381,7 +1415,12 @@ async function buildSidepanelPrompt(request: ChatPromptBuildRequest): Promise<{
     cadence: promptSettings.presetCadence,
   });
 
-  const enabledDescriptors = filterSidepanelChatToolDescriptors(toolDescriptors);
+  const sidepanelDescriptors = filterSidepanelChatToolDescriptors(toolDescriptors);
+  const enabledDescriptors = projectMcpCapabilityDescriptors({
+    descriptors: sidepanelDescriptors,
+    settings: await getMcpCapabilitySettings(),
+    intent: request.prompt,
+  }).descriptors;
   const { augmented } = buildPromptAugmentation(request.prompt, {
     memories: memories.filter((memory) => memory.scope !== 'project'),
     presetContent: shouldInjectPreset ? activePreset?.content ?? null : null,

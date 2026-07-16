@@ -171,6 +171,19 @@ export interface ToolAuthorizationSubject {
   chatSessionId?: string | null;
 }
 
+/**
+ * A background-owned capability scope. It is derived after the outer tool
+ * call has passed normal runtime authorization; it is never accepted from a
+ * page/model payload as authority.
+ */
+export interface ToolCapabilityScope {
+  kind: 'grant' | 'trusted';
+  scopeId: string;
+  trigger: ToolExecutionTrigger;
+  chatSessionId: string | null;
+  subject?: ToolAuthorizationSubject;
+}
+
 export interface ToolAuthorizationDescriptorSnapshot {
   id: ToolDescriptorId;
   provider: Pick<ToolProviderIdentity, 'kind' | 'id' | 'transport'>;
@@ -199,6 +212,12 @@ export interface TrustedToolExecutionContext {
   kind: 'trusted';
   trigger: ToolExecutionTrigger;
   requestId: string;
+  /**
+   * Optional background-owned continuity key for a multi-step trusted run.
+   * It is intentionally separate from ToolCall.source, whose fields are
+   * model/page routing claims rather than an authority boundary.
+   */
+  capabilityScopeId?: string;
   chatSessionId?: string | null;
   taskId?: string;
   runId?: string;

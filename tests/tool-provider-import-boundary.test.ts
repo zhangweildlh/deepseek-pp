@@ -63,7 +63,7 @@ describe('tool provider import boundary', () => {
   it('keeps content descriptor synchronization strict and fail-closed', () => {
     const source = readFileSync(resolve(ROOT, 'entrypoints/content.ts'), 'utf8');
 
-    expect(source).toContain("import { isToolDescriptorRecord } from '../core/messaging/tool-record-codec';");
+    expect(source).toMatch(/import\s*\{[\s\S]*?isToolDescriptorRecord[\s\S]*?\}\s*from '\.\.\/core\/messaging\/tool-record-codec';/);
     expect(source).toContain("sendRuntimeMessageStrict<ToolDescriptor[]>({ type: 'GET_TOOL_DESCRIPTORS' })");
     expect(source).toContain('tool descriptor sync failed; tool execution disabled');
     expect(source).toContain('let currentToolDescriptors: ToolDescriptor[] = [];');
@@ -72,6 +72,9 @@ describe('tool provider import boundary', () => {
     expect(source).toContain('await Promise.all([runtimeStateSync, descriptorSync]);');
     expect(source).toContain('syncLease.commit(() => syncToMainWorld(');
     expect(source).toContain('syncRuntimeState: syncCurrentRuntimeStateToMainWorld,');
+    expect(source).toContain('const fallbackPromptDescriptors = toolDescriptors.filter(');
+    expect(source).toContain('(descriptor) => !isMcpCapabilityDescriptor(descriptor)');
+    expect(source).toContain('toolDescriptors: fallbackPromptDescriptors,');
     expect(source).not.toContain('normalizeToolDescriptors');
 
     const hookSource = readFileSync(resolve(ROOT, 'core/interceptor/fetch-hook.ts'), 'utf8');

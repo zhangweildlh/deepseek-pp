@@ -29,6 +29,7 @@ beforeEach(() => {
         if (message.type === 'GET_PLATFORM_CAPABILITIES') return platformEnvironment;
         if (message.type === 'GET_MCP_TOOL_CACHE') return multimodalCache;
         if (message.type === 'GET_TOOL_CALL_HISTORY') return historyResponse;
+        if (message.type === 'GET_MCP_CAPABILITY_SETTINGS') return capabilitySettings;
         return null;
       }),
       onMessage: {
@@ -119,6 +120,13 @@ const platformEnvironment = {
   kind: 'browser_extension',
   name: 'WebExtension',
   capabilities: { nativeMessaging: true },
+};
+
+const capabilitySettings = {
+  version: 1,
+  adaptiveMaxDirectTools: 8,
+  adaptiveMaxPromptBytes: 24_000,
+  servers: {},
 };
 
 const multimodalServer: McpServerConfig = {

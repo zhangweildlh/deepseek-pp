@@ -40,6 +40,7 @@ export interface ExternalPayloadAuthorizationCachePort {
 export interface ToolExecutionRuntimeHandlerDependencies {
   getLocale(): SupportedLocale;
   getToolDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
+  getPromptToolDescriptors(locale: SupportedLocale, intent: string): Promise<ToolDescriptor[]>;
   getAuthorizationDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   refreshToolDescriptors(locale: SupportedLocale): Promise<ToolDescriptor[]>;
   createToolAuthorization(input: CreateToolAuthorizationInput): Promise<ToolAuthorizationGrantSummary>;
@@ -99,7 +100,10 @@ export function createToolExecutionRuntimeHandlers(
       }
 
       const payload = decoded.payload;
-      const currentDescriptors = await dependencies.getToolDescriptors(dependencies.getLocale());
+      const locale = dependencies.getLocale();
+      const currentDescriptors = payload.descriptorIds
+        ? await dependencies.getToolDescriptors(locale)
+        : await dependencies.getPromptToolDescriptors(locale, payload.toolIntent ?? '');
       const requestedDescriptorIds = payload.descriptorIds
         ? new Set(payload.descriptorIds)
         : null;
@@ -253,6 +257,7 @@ export function createTrustedToolExecutionContext(
   call: ToolCall,
   trigger: ToolExecutionTrigger,
   createRequestId: () => string = () => crypto.randomUUID(),
+  capabilityScopeId?: string,
 ): TrustedToolExecutionContext {
   return {
     kind: 'trusted',
@@ -261,6 +266,7 @@ export function createTrustedToolExecutionContext(
       ?? call.source?.automationRunId
       ?? call.source?.runId
       ?? createRequestId(),
+    capabilityScopeId,
     chatSessionId: call.source?.chatSessionId ?? null,
     taskId: call.source?.taskId,
     runId: call.source?.runId,
