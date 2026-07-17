@@ -5,6 +5,7 @@ describe('whole-key persistence boundaries', () => {
   it('owns one independent queue per store instead of joining the sync-global lock', () => {
     for (const [path, queueFactory] of [
       ['core/automation/store.ts', 'createSerialOperationQueue'],
+      ['core/mcp/store.ts', 'createSerialOperationQueue'],
       ['core/usage/store.ts', 'createCoalescingMutationQueue'],
       ['core/tool/history.ts', 'createCoalescingMutationQueue'],
     ] as const) {

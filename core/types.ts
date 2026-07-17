@@ -52,6 +52,7 @@ export type {
   McpServerResultLimits,
   McpServerStatus,
   McpServerStorageState,
+  McpServerStorageVersion,
   McpServerTimeouts,
   McpServerTransportConfig,
   McpServerUpdateInput,

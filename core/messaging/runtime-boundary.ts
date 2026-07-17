@@ -150,8 +150,8 @@ export function createRuntimeMessageContext(
   if (senderOrigin !== deepSeekOrigin || tabId === undefined || (frameId !== undefined && frameId !== 0)) {
     throwUnauthorized('Runtime content sender is not the DeepSeek top-level frame.');
   }
-  if (tabUrl && (readUrlOrigin(tabUrl) !== deepSeekOrigin || tabUrl !== senderUrl)) {
-    throwUnauthorized('Runtime sender tab does not match the DeepSeek top-level document.');
+  if (tabUrl && readUrlOrigin(tabUrl) !== deepSeekOrigin) {
+    throwUnauthorized('Runtime sender tab is not a DeepSeek top-level document.');
   }
   if (frameId === undefined && tabUrl === undefined) {
     throwUnauthorized('Runtime content sender has no top-level frame evidence.');
