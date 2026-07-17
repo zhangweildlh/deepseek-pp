@@ -12,20 +12,24 @@ import {
   encodeMcpStorageState,
   MCP_STORAGE_KEY,
   McpStorageContractError,
+  migrateMcpStorageState,
 } from '../core/mcp/storage-codec';
 import {
   MCP_SERVER_IDS,
-  MCP_STORAGE_FORGED_CACHE_ANNOTATION,
-  MCP_STORAGE_FORGED_CACHE_TRANSPORT,
   MCP_STORAGE_CORRUPT_SERVER,
   MCP_STORAGE_DUPLICATE_SERVER,
   MCP_STORAGE_FUTURE_ROOT,
   MCP_STORAGE_FUTURE_SERVER,
   MCP_STORAGE_FUTURE_TRANSPORT,
   MCP_STORAGE_ORPHAN_CACHE,
-  MCP_STORAGE_V1,
   MCP_STORAGE_V1_ADDITIVE_ROOT,
-  MCP_STORAGE_V1_COLLIDING_CACHE,
+  MCP_STORAGE_V1_CORRUPT_SERVER,
+  MCP_STORAGE_V1_STALE_CACHE,
+  MCP_STORAGE_V2,
+  MCP_STORAGE_V2_ADDITIVE_ROOT,
+  MCP_STORAGE_V2_COLLIDING_CACHE,
+  MCP_STORAGE_V2_FORGED_CACHE_ANNOTATION,
+  MCP_STORAGE_V2_FORGED_CACHE_TRANSPORT,
 } from './fixtures/persistence-contract/mcp';
 
 let storage: Record<string, unknown>;
@@ -73,21 +77,50 @@ afterEach(() => {
 });
 
 describe('MCP persisted-config contract', () => {
-  it('decodes and encodes every released v1 transport without changing the record', () => {
-    const raw = structuredClone(MCP_STORAGE_V1);
+  it('decodes and encodes every current v2 transport without changing the record', () => {
+    const raw = structuredClone(MCP_STORAGE_V2);
 
     expect(encodeMcpStorageState(decodeMcpStorageState(raw))).toEqual(raw);
-    expect(raw).toEqual(MCP_STORAGE_V1);
+    expect(raw).toEqual(MCP_STORAGE_V2);
   });
 
-  it('accepts historical v1 cache collisions so the user can clear or refresh them', () => {
-    const raw = structuredClone(MCP_STORAGE_V1_COLLIDING_CACHE);
+  it('migrates legal v1 server configuration, preserves additive root fields, and clears its cache', () => {
+    const raw = structuredClone(MCP_STORAGE_V1_ADDITIVE_ROOT);
+    const original = structuredClone(raw);
+
+    expect(migrateMcpStorageState(raw)).toEqual({
+      migrated: true,
+      state: {
+        ...MCP_STORAGE_V2,
+        additiveField: { preserve: true },
+        toolCaches: [],
+      },
+    });
+    expect(raw).toEqual(original);
+  });
+
+  it('migrates a stale v1 cache before serving its server configuration exactly once', async () => {
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V1_STALE_CACHE);
+
+    await expect(getAllMcpServers({ includeSecrets: true })).resolves.toEqual(MCP_STORAGE_V2.servers);
+    expect(storage[MCP_STORAGE_KEY]).toEqual({
+      ...MCP_STORAGE_V2,
+      toolCaches: [],
+    });
+    expect(storageSet).toHaveBeenCalledTimes(1);
+
+    await expect(getAllMcpServers()).resolves.toHaveLength(MCP_STORAGE_V2.servers.length);
+    expect(storageSet).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts current v2 cache collisions so the user can clear or refresh them', () => {
+    const raw = structuredClone(MCP_STORAGE_V2_COLLIDING_CACHE);
 
     expect(encodeMcpStorageState(decodeMcpStorageState(raw))).toEqual(raw);
   });
 
-  it('rejects a historical cache collision when it becomes an active catalog', async () => {
-    const state = decodeMcpStorageState(structuredClone(MCP_STORAGE_V1_COLLIDING_CACHE));
+  it('rejects a current cache collision when it becomes an active catalog', async () => {
+    const state = decodeMcpStorageState(structuredClone(MCP_STORAGE_V2_COLLIDING_CACHE));
     const registry = new ToolProviderRegistry([{
       registration: { kind: 'mcp' },
       async listTools() {
@@ -102,7 +135,7 @@ describe('MCP persisted-config contract', () => {
   });
 
   it('preserves additive top-level fields through codec and store mutations', async () => {
-    const raw = structuredClone(MCP_STORAGE_V1_ADDITIVE_ROOT);
+    const raw = structuredClone(MCP_STORAGE_V2_ADDITIVE_ROOT);
     expect(encodeMcpStorageState(decodeMcpStorageState(raw))).toEqual(raw);
     storage[MCP_STORAGE_KEY] = raw;
 
@@ -113,7 +146,7 @@ describe('MCP persisted-config contract', () => {
     });
   });
 
-  it('treats a missing key as empty v1 without writing storage', async () => {
+  it('treats a missing key as empty v2 without writing storage', async () => {
     await expect(getAllMcpServers()).resolves.toEqual([]);
     expect(storageSet).not.toHaveBeenCalled();
     expect(randomUUID).not.toHaveBeenCalled();
@@ -124,10 +157,11 @@ describe('MCP persisted-config contract', () => {
     ['future server', MCP_STORAGE_FUTURE_SERVER, 'mcp_storage_version_unsupported'],
     ['future transport', MCP_STORAGE_FUTURE_TRANSPORT, 'mcp_storage_transport_unsupported'],
     ['corrupt server', MCP_STORAGE_CORRUPT_SERVER, 'mcp_storage_corrupt'],
+    ['corrupt legacy server', MCP_STORAGE_V1_CORRUPT_SERVER, 'mcp_storage_corrupt'],
     ['duplicate server', MCP_STORAGE_DUPLICATE_SERVER, 'mcp_storage_corrupt'],
     ['orphan cache', MCP_STORAGE_ORPHAN_CACHE, 'mcp_storage_corrupt'],
-    ['forged cache annotation', MCP_STORAGE_FORGED_CACHE_ANNOTATION, 'mcp_storage_corrupt'],
-    ['forged cache transport', MCP_STORAGE_FORGED_CACHE_TRANSPORT, 'mcp_storage_corrupt'],
+    ['forged cache annotation', MCP_STORAGE_V2_FORGED_CACHE_ANNOTATION, 'mcp_storage_corrupt'],
+    ['forged cache transport', MCP_STORAGE_V2_FORGED_CACHE_TRANSPORT, 'mcp_storage_corrupt'],
   ])('rejects %s before mutation and preserves the raw record', async (_name, fixture, code) => {
     const raw = structuredClone(fixture);
     const originalJson = JSON.stringify(raw);
@@ -170,8 +204,23 @@ describe('MCP persisted-config contract', () => {
     expect(storageSet).not.toHaveBeenCalled();
   });
 
+  it('serializes concurrent whole-key mutations so neither server update is lost', async () => {
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
+
+    await Promise.all([
+      updateMcpServer(MCP_SERVER_IDS.http, { displayName: 'Updated HTTP' }),
+      updateMcpServer(MCP_SERVER_IDS.shell, { displayName: 'Updated Shell' }),
+    ]);
+
+    const state = decodeMcpStorageState(storage[MCP_STORAGE_KEY]);
+    expect(state.servers.find((server) => server.id === MCP_SERVER_IDS.http)?.displayName)
+      .toBe('Updated HTTP');
+    expect(state.servers.find((server) => server.id === MCP_SERVER_IDS.shell)?.displayName)
+      .toBe('Updated Shell');
+  });
+
   it('preserves server and secret identities through redacted updates', async () => {
-    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V1);
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
     const before = await getMcpServerById(MCP_SERVER_IDS.shell, { includeSecrets: true });
     const redacted = await getMcpServerById(MCP_SERVER_IDS.shell);
 

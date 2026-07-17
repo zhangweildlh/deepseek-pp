@@ -81,8 +81,8 @@ export const MCP_CACHE_ENTRY: McpToolCacheEntry = {
   },
 };
 
-export const MCP_STORAGE_V1: McpServerStorageState = {
-  version: 1,
+export const MCP_STORAGE_V2: McpServerStorageState = {
+  version: 2,
   servers: [
     createServer(MCP_SERVER_IDS.http, {
       kind: 'http',
@@ -109,13 +109,39 @@ export const MCP_STORAGE_V1: McpServerStorageState = {
   toolCaches: [MCP_CACHE_ENTRY],
 };
 
+export const MCP_STORAGE_V1 = {
+  ...MCP_STORAGE_V2,
+  version: 1 as const,
+};
+
 export const MCP_STORAGE_V1_ADDITIVE_ROOT = {
   ...MCP_STORAGE_V1,
   additiveField: { preserve: true },
 };
 
-export const MCP_STORAGE_V1_COLLIDING_CACHE = {
+export const MCP_STORAGE_V1_STALE_CACHE = {
   ...MCP_STORAGE_V1,
+  toolCaches: [{
+    ...MCP_CACHE_ENTRY,
+    descriptors: [{
+      ...MCP_CACHE_DESCRIPTOR,
+      id: 'mcp:contract-shell:stale-shell-status',
+    }],
+  }],
+};
+
+export const MCP_STORAGE_V1_CORRUPT_SERVER = {
+  ...MCP_STORAGE_V1,
+  servers: [{ ...MCP_STORAGE_V1.servers[0], id: '' }, ...MCP_STORAGE_V1.servers.slice(1)],
+};
+
+export const MCP_STORAGE_V2_ADDITIVE_ROOT = {
+  ...MCP_STORAGE_V2,
+  additiveField: { preserve: true },
+};
+
+export const MCP_STORAGE_V2_COLLIDING_CACHE = {
+  ...MCP_STORAGE_V2,
   toolCaches: [{
     ...MCP_CACHE_ENTRY,
     descriptors: [
@@ -144,8 +170,8 @@ export const MCP_STORAGE_V1_COLLIDING_CACHE = {
   }],
 };
 
-export const MCP_STORAGE_FORGED_CACHE_ANNOTATION = {
-  ...MCP_STORAGE_V1,
+export const MCP_STORAGE_V2_FORGED_CACHE_ANNOTATION = {
+  ...MCP_STORAGE_V2,
   toolCaches: [{
     ...MCP_CACHE_ENTRY,
     descriptors: [{
@@ -158,8 +184,8 @@ export const MCP_STORAGE_FORGED_CACHE_ANNOTATION = {
   }],
 };
 
-export const MCP_STORAGE_FORGED_CACHE_TRANSPORT = {
-  ...MCP_STORAGE_V1,
+export const MCP_STORAGE_V2_FORGED_CACHE_TRANSPORT = {
+  ...MCP_STORAGE_V2,
   toolCaches: [{
     ...MCP_CACHE_ENTRY,
     descriptors: [{
@@ -173,22 +199,22 @@ export const MCP_STORAGE_FORGED_CACHE_TRANSPORT = {
 };
 
 export const MCP_STORAGE_FUTURE_ROOT = {
-  ...MCP_STORAGE_V1,
-  version: 2,
+  ...MCP_STORAGE_V2,
+  version: 3,
   futureField: { preserve: true },
 };
 
 export const MCP_STORAGE_FUTURE_SERVER = {
-  ...MCP_STORAGE_V1,
+  ...MCP_STORAGE_V2,
   servers: [
-    { ...MCP_STORAGE_V1.servers[0], version: 2, futureField: 'preserve-server' },
-    ...MCP_STORAGE_V1.servers.slice(1),
+    { ...MCP_STORAGE_V2.servers[0], version: 2, futureField: 'preserve-server' },
+    ...MCP_STORAGE_V2.servers.slice(1),
   ],
 };
 
 export const MCP_STORAGE_FUTURE_TRANSPORT = {
-  ...MCP_STORAGE_V1,
-  servers: MCP_STORAGE_V1.servers.map((server, index) => index === 0
+  ...MCP_STORAGE_V2,
+  servers: MCP_STORAGE_V2.servers.map((server, index) => index === 0
     ? {
         ...server,
         transport: { kind: 'websocket', url: 'wss://future.example.test/mcp' },
@@ -197,17 +223,17 @@ export const MCP_STORAGE_FUTURE_TRANSPORT = {
 };
 
 export const MCP_STORAGE_CORRUPT_SERVER = {
-  ...MCP_STORAGE_V1,
-  servers: [{ ...MCP_STORAGE_V1.servers[0], id: '' }, ...MCP_STORAGE_V1.servers.slice(1)],
+  ...MCP_STORAGE_V2,
+  servers: [{ ...MCP_STORAGE_V2.servers[0], id: '' }, ...MCP_STORAGE_V2.servers.slice(1)],
 };
 
 export const MCP_STORAGE_DUPLICATE_SERVER = {
-  ...MCP_STORAGE_V1,
-  servers: [...MCP_STORAGE_V1.servers, { ...MCP_STORAGE_V1.servers[0] }],
+  ...MCP_STORAGE_V2,
+  servers: [...MCP_STORAGE_V2.servers, { ...MCP_STORAGE_V2.servers[0] }],
 };
 
 export const MCP_STORAGE_ORPHAN_CACHE = {
-  ...MCP_STORAGE_V1,
+  ...MCP_STORAGE_V2,
   toolCaches: [{
     ...MCP_CACHE_ENTRY,
     serverId: 'missing-server',

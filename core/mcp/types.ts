@@ -13,6 +13,8 @@ export type McpServerStatus = 'unknown' | 'ready' | 'error' | 'disabled';
 
 export type McpServerConfigVersion = 1;
 
+export type McpServerStorageVersion = 2;
+
 export type McpServerSecretKind = 'bearer' | 'basic' | 'header';
 
 export interface McpSecretValue {
@@ -108,7 +110,7 @@ export type McpServerUpdateInput = Partial<
 >;
 
 export interface McpServerStorageState {
-  version: McpServerConfigVersion;
+  version: McpServerStorageVersion;
   servers: McpServerConfig[];
   toolCaches: McpToolCacheEntry[];
 }

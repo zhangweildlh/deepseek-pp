@@ -11,142 +11,163 @@ import type {
   McpToolCacheEntry,
 } from './types';
 import { MCP_DEFAULT_LIMITS, MCP_DEFAULT_TIMEOUTS } from './constants';
+import { createSerialOperationQueue } from '../persistence/serial-operation-queue';
 import {
   decodeMcpStorageState,
   encodeMcpStorageState,
+  MCP_SERVER_CONFIG_VERSION,
   MCP_STORAGE_KEY,
-  MCP_STORAGE_VERSION,
+  migrateMcpStorageState,
 } from './storage-codec';
 
 const REDACTED_SECRET_VALUE = '********';
+const mcpStorageOperations = createSerialOperationQueue();
 
 export async function getAllMcpServers(options?: { includeSecrets?: boolean }): Promise<McpServerConfig[]> {
-  const state = await readState();
-  const servers = [...state.servers].sort((a, b) => b.updatedAt - a.updatedAt);
-  return options?.includeSecrets ? servers : servers.map(sanitizeMcpServerConfig);
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    const servers = [...state.servers].sort((a, b) => b.updatedAt - a.updatedAt);
+    return options?.includeSecrets ? servers : servers.map(sanitizeMcpServerConfig);
+  });
 }
 
 export async function getMcpServerById(
   id: McpServerId,
   options?: { includeSecrets?: boolean },
 ): Promise<McpServerConfig | null> {
-  const state = await readState();
-  const server = state.servers.find((item) => item.id === id) ?? null;
-  if (!server) return null;
-  return options?.includeSecrets ? server : sanitizeMcpServerConfig(server);
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    const server = state.servers.find((item) => item.id === id) ?? null;
+    if (!server) return null;
+    return options?.includeSecrets ? server : sanitizeMcpServerConfig(server);
+  });
 }
 
 export async function createMcpServer(input: McpServerCreateInput): Promise<McpServerConfig> {
-  const state = await readState();
-  const now = Date.now();
-  const server = normalizeServerForMutation({
-    version: MCP_STORAGE_VERSION,
-    id: crypto.randomUUID(),
-    displayName: input.displayName,
-    enabled: input.enabled ?? true,
-    transport: input.transport,
-    headers: input.headers ?? [],
-    secrets: input.secrets ?? [],
-    timeouts: input.timeouts ?? MCP_DEFAULT_TIMEOUTS,
-    limits: input.limits ?? MCP_DEFAULT_LIMITS,
-    allowlist: input.allowlist ?? {
-      mode: 'all',
-      toolNames: [],
-    },
-    execution: input.execution ?? {
-      mode: 'auto',
-      enabled: true,
-    },
-    status: input.enabled === false ? 'disabled' : 'unknown',
-    lastConnectedAt: null,
-    lastError: null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    const now = Date.now();
+    const server = normalizeServerForMutation({
+      version: MCP_SERVER_CONFIG_VERSION,
+      id: crypto.randomUUID(),
+      displayName: input.displayName,
+      enabled: input.enabled ?? true,
+      transport: input.transport,
+      headers: input.headers ?? [],
+      secrets: input.secrets ?? [],
+      timeouts: input.timeouts ?? MCP_DEFAULT_TIMEOUTS,
+      limits: input.limits ?? MCP_DEFAULT_LIMITS,
+      allowlist: input.allowlist ?? {
+        mode: 'all',
+        toolNames: [],
+      },
+      execution: input.execution ?? {
+        mode: 'auto',
+        enabled: true,
+      },
+      status: input.enabled === false ? 'disabled' : 'unknown',
+      lastConnectedAt: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    });
 
-  await writeState({
-    ...state,
-    servers: [server, ...state.servers.filter((item) => item.id !== server.id)],
-  });
+    await writeStateAlreadyOwned({
+      ...state,
+      servers: [server, ...state.servers.filter((item) => item.id !== server.id)],
+    });
 
-  return sanitizeMcpServerConfig(server);
+    return sanitizeMcpServerConfig(server);
+  });
 }
 
 export async function updateMcpServer(
   id: McpServerId,
   patch: McpServerUpdateInput,
 ): Promise<McpServerConfig | null> {
-  const state = await readState();
-  let updated: McpServerConfig | null = null;
-  const cacheInvalidations = new Set<McpServerId>();
-  const servers = state.servers.map((server) => {
-    if (server.id !== id) return server;
-    const nextPatch: McpServerUpdateInput = patch.secrets
-      ? { ...patch, secrets: mergeRedactedSecrets(server.secrets, patch.secrets) }
-      : patch;
-    const nextServer = normalizeServerForMutation({
-      ...server,
-      ...nextPatch,
-      updatedAt: Date.now(),
-      status: resolvePatchedServerStatus(server, nextPatch),
-    });
-    if (shouldInvalidateMcpToolCache(server, nextServer)) {
-      cacheInvalidations.add(server.id);
-      updated = {
-        ...nextServer,
-        status: nextServer.enabled ? 'unknown' : 'disabled',
-        lastConnectedAt: null,
-        lastError: null,
-      };
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    let updated: McpServerConfig | null = null;
+    const cacheInvalidations = new Set<McpServerId>();
+    const servers = state.servers.map((server) => {
+      if (server.id !== id) return server;
+      const nextPatch: McpServerUpdateInput = patch.secrets
+        ? { ...patch, secrets: mergeRedactedSecrets(server.secrets, patch.secrets) }
+        : patch;
+      const nextServer = normalizeServerForMutation({
+        ...server,
+        ...nextPatch,
+        updatedAt: Date.now(),
+        status: resolvePatchedServerStatus(server, nextPatch),
+      });
+      if (shouldInvalidateMcpToolCache(server, nextServer)) {
+        cacheInvalidations.add(server.id);
+        updated = {
+          ...nextServer,
+          status: nextServer.enabled ? 'unknown' : 'disabled',
+          lastConnectedAt: null,
+          lastError: null,
+        };
+        return updated;
+      }
+      updated = nextServer;
       return updated;
-    }
-    updated = nextServer;
-    return updated;
-  });
+    });
 
-  if (!updated) return null;
-  await writeState({
-    ...state,
-    servers,
-    toolCaches: cacheInvalidations.size > 0
-      ? state.toolCaches.filter((cache) => !cacheInvalidations.has(cache.serverId))
-      : state.toolCaches,
+    if (!updated) return null;
+    await writeStateAlreadyOwned({
+      ...state,
+      servers,
+      toolCaches: cacheInvalidations.size > 0
+        ? state.toolCaches.filter((cache) => !cacheInvalidations.has(cache.serverId))
+        : state.toolCaches,
+    });
+    return sanitizeMcpServerConfig(updated);
   });
-  return sanitizeMcpServerConfig(updated);
 }
 
 export async function deleteMcpServer(id: McpServerId): Promise<void> {
-  const state = await readState();
-  await writeState({
-    ...state,
-    servers: state.servers.filter((server) => server.id !== id),
-    toolCaches: state.toolCaches.filter((cache) => cache.serverId !== id),
+  await mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    await writeStateAlreadyOwned({
+      ...state,
+      servers: state.servers.filter((server) => server.id !== id),
+      toolCaches: state.toolCaches.filter((cache) => cache.serverId !== id),
+    });
   });
 }
 
 export async function getMcpToolCache(serverId: McpServerId): Promise<McpToolCacheEntry | null> {
-  const state = await readState();
-  return state.toolCaches.find((cache) => cache.serverId === serverId) ?? null;
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    return state.toolCaches.find((cache) => cache.serverId === serverId) ?? null;
+  });
 }
 
 export async function getAllMcpToolCaches(): Promise<McpToolCacheEntry[]> {
-  const state = await readState();
-  return [...state.toolCaches].sort((a, b) => b.refreshedAt - a.refreshedAt);
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    return [...state.toolCaches].sort((a, b) => b.refreshedAt - a.refreshedAt);
+  });
 }
 
 export async function saveMcpToolCache(entry: McpToolCacheEntry): Promise<void> {
-  const state = await readState();
-  await writeState({
-    ...state,
-    toolCaches: [entry, ...state.toolCaches.filter((cache) => cache.serverId !== entry.serverId)],
+  await mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    await writeStateAlreadyOwned({
+      ...state,
+      toolCaches: [entry, ...state.toolCaches.filter((cache) => cache.serverId !== entry.serverId)],
+    });
   });
 }
 
 export async function clearMcpToolCache(serverId: McpServerId): Promise<void> {
-  const state = await readState();
-  await writeState({
-    ...state,
-    toolCaches: state.toolCaches.filter((cache) => cache.serverId !== serverId),
+  await mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    await writeStateAlreadyOwned({
+      ...state,
+      toolCaches: state.toolCaches.filter((cache) => cache.serverId !== serverId),
+    });
   });
 }
 
@@ -173,12 +194,14 @@ export function buildMcpRequestHeaders(server: McpServerConfig): Record<string, 
   return headers;
 }
 
-async function readState(): Promise<McpServerStorageState> {
+async function readStateAlreadyOwned(): Promise<McpServerStorageState> {
   const data = await chrome.storage.local.get(MCP_STORAGE_KEY) as Record<string, unknown>;
-  return decodeMcpStorageState(data[MCP_STORAGE_KEY]);
+  const migration = migrateMcpStorageState(data[MCP_STORAGE_KEY]);
+  if (migration.migrated) await writeStateAlreadyOwned(migration.state);
+  return migration.state;
 }
 
-async function writeState(state: McpServerStorageState): Promise<void> {
+async function writeStateAlreadyOwned(state: McpServerStorageState): Promise<void> {
   await chrome.storage.local.set({
     [MCP_STORAGE_KEY]: encodeMcpStorageState(state),
   });
@@ -190,7 +213,7 @@ function normalizeServerForMutation(raw: unknown): McpServerConfig {
   const enabled = value.enabled !== false;
   const status = normalizeServerStatus(value.status, enabled);
   return {
-    version: MCP_STORAGE_VERSION,
+    version: MCP_SERVER_CONFIG_VERSION,
     id: stringValue(value.id) || crypto.randomUUID(),
     displayName: stringValue(value.displayName) || 'MCP Server',
     enabled,

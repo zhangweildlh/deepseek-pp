@@ -92,9 +92,13 @@ export {
   createEmptyMcpStorageState,
   decodeMcpStorageState,
   encodeMcpStorageState,
+  migrateMcpStorageState,
+  MCP_LEGACY_STORAGE_VERSION,
+  MCP_SERVER_CONFIG_VERSION,
   MCP_STORAGE_KEY,
   MCP_STORAGE_VERSION,
   type McpStorageContractErrorCode,
+  type McpStorageMigration,
 } from './storage-codec';
 
 export {
@@ -153,6 +157,7 @@ export type {
   McpServerResultLimits,
   McpServerStatus,
   McpServerStorageState,
+  McpServerStorageVersion,
   McpServerTimeouts,
   McpServerTransportConfig,
   McpServerUpdateInput,

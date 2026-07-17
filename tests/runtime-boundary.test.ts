@@ -90,6 +90,24 @@ describe('runtime sender and envelope boundary', () => {
     });
   });
 
+  it('accepts a same-origin DeepSeek route change for an existing content document', () => {
+    const context = createRuntimeMessageContext({
+      ...DEEPSEEK_SENDER,
+      tab: {
+        id: 17,
+        url: 'https://chat.deepseek.com/a/chat/s/new-session',
+      },
+    }, POLICY);
+
+    expect(context).toMatchObject({
+      surface: 'deepseek_content',
+      senderUrl: DEEPSEEK_SENDER.url,
+      tabUrl: 'https://chat.deepseek.com/a/chat/s/new-session',
+      documentSessionId: 'deepseek-document-1',
+      chatSessionId: 'session-contract',
+    });
+  });
+
   it('accepts a missing Firefox frameId only with matching top-level tab evidence', () => {
     const context = createRuntimeMessageContext({ ...DEEPSEEK_SENDER, frameId: undefined }, POLICY);
     expect(context.frameId).toBe(0);
@@ -109,7 +127,7 @@ describe('runtime sender and envelope boundary', () => {
     ['invalid extension tab id', { ...EXTENSION_SENDER, tab: { id: -1 } }],
     ['web origin', { ...EXTENSION_SENDER, url: 'https://example.test/sidepanel.html', origin: 'https://example.test' }],
     ['DeepSeek child frame', { ...DEEPSEEK_SENDER, frameId: 2 }],
-    ['DeepSeek tab mismatch', { ...DEEPSEEK_SENDER, tab: { id: 17, url: 'https://chat.deepseek.com/a/chat/s/other' } }],
+    ['DeepSeek non-DeepSeek tab', { ...DEEPSEEK_SENDER, tab: { id: 17, url: 'https://example.test/a/chat/s/other' } }],
   ] as const)('rejects unauthorized sender context: %s', (_name, sender) => {
     expect(() => createRuntimeMessageContext(sender, POLICY)).toThrow();
   });

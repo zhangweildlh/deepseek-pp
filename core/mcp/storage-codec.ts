@@ -7,7 +7,9 @@ import type {
 } from './types';
 
 export const MCP_STORAGE_KEY = 'deepseek_pp_mcp_servers';
-export const MCP_STORAGE_VERSION = 1 as const;
+export const MCP_SERVER_CONFIG_VERSION = 1 as const;
+export const MCP_LEGACY_STORAGE_VERSION = 1 as const;
+export const MCP_STORAGE_VERSION = 2 as const;
 
 const TRANSPORT_KINDS = new Set([
   'http',
@@ -37,6 +39,11 @@ export class McpStorageContractError extends Error {
   }
 }
 
+export interface McpStorageMigration {
+  state: McpServerStorageState;
+  migrated: boolean;
+}
+
 export function createEmptyMcpStorageState(): McpServerStorageState {
   return {
     version: MCP_STORAGE_VERSION,
@@ -45,20 +52,15 @@ export function createEmptyMcpStorageState(): McpServerStorageState {
   };
 }
 
-/** Pure v1 decoder. It never repairs, mutates, timestamps, or allocates IDs. */
+/** Pure v2 decoder. It never repairs, mutates, timestamps, or allocates IDs. */
 export function decodeMcpStorageState(raw: unknown): McpServerStorageState {
   if (raw === undefined) return createEmptyMcpStorageState();
   const state = requireRecord(raw, '$');
-  requireVersion(state.version, '$.version');
+  requireStorageVersion(state.version, '$.version');
   const servers = requireArray(state.servers, '$.servers');
   const toolCaches = requireArray(state.toolCaches, '$.toolCaches');
 
-  const serversById = new Map<string, McpServerConfig>();
-  servers.forEach((server, index) => {
-    const decoded = validateServer(server, `$.servers[${index}]`);
-    if (serversById.has(decoded.id)) fail(`$.servers[${index}].id`, 'Duplicate MCP server id.');
-    serversById.set(decoded.id, decoded);
-  });
+  const serversById = validateServers(servers);
 
   const cacheServerIds = new Set<string>();
   toolCaches.forEach((cache, index) => {
@@ -76,9 +78,43 @@ export function encodeMcpStorageState(state: McpServerStorageState): McpServerSt
   return decodeMcpStorageState(state);
 }
 
+/**
+ * Migrates the released v1 root state to v2 before any current-state read or
+ * mutation. Server configuration remains v1 and is validated exactly; v1 tool
+ * caches are non-authoritative derived data from before the strict descriptor
+ * contract, so they are deliberately invalidated rather than repaired.
+ */
+export function migrateMcpStorageState(raw: unknown): McpStorageMigration {
+  if (raw === undefined) {
+    return { state: createEmptyMcpStorageState(), migrated: false };
+  }
+
+  const state = requireRecord(raw, '$');
+  if (state.version === MCP_STORAGE_VERSION) {
+    return { state: decodeMcpStorageState(state), migrated: false };
+  }
+  if (state.version !== MCP_LEGACY_STORAGE_VERSION) {
+    requireStorageVersion(state.version, '$.version');
+  }
+
+  const servers = requireArray(state.servers, '$.servers');
+  requireArray(state.toolCaches, '$.toolCaches');
+  validateServers(servers);
+
+  return {
+    state: decodeMcpStorageState({
+      ...state,
+      version: MCP_STORAGE_VERSION,
+      servers,
+      toolCaches: [],
+    }),
+    migrated: true,
+  };
+}
+
 function validateServer(raw: unknown, path: string): McpServerConfig {
   const server = requireRecord(raw, path);
-  requireVersion(server.version, `${path}.version`);
+  requireServerVersion(server.version, `${path}.version`);
   const id = requireNonEmptyString(server.id, `${path}.id`);
   requireString(server.displayName, `${path}.displayName`);
   requireBoolean(server.enabled, `${path}.enabled`);
@@ -190,7 +226,17 @@ function validateToolCache(
   return cache as unknown as McpToolCacheEntry;
 }
 
-function requireVersion(value: unknown, path: string): void {
+function validateServers(servers: unknown[]): Map<string, McpServerConfig> {
+  const serversById = new Map<string, McpServerConfig>();
+  servers.forEach((server, index) => {
+    const decoded = validateServer(server, `$.servers[${index}]`);
+    if (serversById.has(decoded.id)) fail(`$.servers[${index}].id`, 'Duplicate MCP server id.');
+    serversById.set(decoded.id, decoded);
+  });
+  return serversById;
+}
+
+function requireStorageVersion(value: unknown, path: string): void {
   if (typeof value === 'number' && Number.isFinite(value) && value !== MCP_STORAGE_VERSION) {
     throw new McpStorageContractError(
       'mcp_storage_version_unsupported',
@@ -199,6 +245,17 @@ function requireVersion(value: unknown, path: string): void {
     );
   }
   if (value !== MCP_STORAGE_VERSION) fail(path, 'Invalid MCP storage version.');
+}
+
+function requireServerVersion(value: unknown, path: string): void {
+  if (typeof value === 'number' && Number.isFinite(value) && value !== MCP_SERVER_CONFIG_VERSION) {
+    throw new McpStorageContractError(
+      'mcp_storage_version_unsupported',
+      path,
+      'Unsupported persisted MCP server version.',
+    );
+  }
+  if (value !== MCP_SERVER_CONFIG_VERSION) fail(path, 'Invalid MCP server version.');
 }
 
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
