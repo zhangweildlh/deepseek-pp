@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1111-release-highlights">1.11.1 Highlights</a>
+  <a href="#1112-release-highlights">1.11.2 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.1 Release Highlights](#1111-release-highlights)
+- [1.11.2 Release Highlights](#1112-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,21 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.1 Release Highlights
+## 1.11.2 Release Highlights
+
+1.11.2 restores predictable everyday chat and existing MCP connections after an upgrade, reducing interruptions when starting a new conversation or reusing a saved service.
+
+| Area | Main changes |
+|------|--------------|
+| New-chat reliability | Fixes cases where a new DeepSeek conversation could stop before the first reply, so ordinary chats can start and receive a response normally. |
+| Existing MCP recovery | Recognizes and restores valid saved MCP service configurations after an upgrade, reducing cases where an old cache required a manual rebuild. |
+| Conversation and tool boundaries | Keeps tool authorization tied to the browser conversation the user is actually viewing, so page transitions do not interrupt normal chat or authorized tool use. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.1 - 0.2.0)</summary>
+
+### 1.11.1 Release Highlights
 
 1.11.1 focuses on MCP connection compatibility, recovery, and large tool-set management, making existing services more reliable while giving users finer control over when tools appear in a conversation.
 
@@ -310,9 +324,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Large MCP service management | Each MCP server can expose tools directly, adaptively, or on demand, making larger tool sets manageable while retaining user control over the actual tools. |
 | Consistent runtime behavior | Manual chat, Agent, the side panel, and automation use consistent tool availability and authorization rules. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.0 - 0.2.0)</summary>
 
 ### 1.11.0 Release Highlights
 
