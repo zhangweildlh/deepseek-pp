@@ -325,12 +325,33 @@ function shouldInvalidateMcpToolCache(previous: McpServerConfig, next: McpServer
 
 function mcpDiscoveryFingerprint(server: McpServerConfig): string {
   return JSON.stringify({
-    transport: server.transport,
+    // Older valid records omit optional transport and secret fields. Mutating
+    // status after discovery normalizes those omissions, which must not
+    // invalidate the cache that discovery just wrote. Secret IDs are UI
+    // identity only; they do not alter the connection or discovery result.
+    transport: {
+      kind: server.transport.kind,
+      url: server.transport.url ?? '',
+      nativeHost: server.transport.nativeHost ?? '',
+      command: server.transport.command ?? '',
+      args: server.transport.args ?? [],
+      cwd: server.transport.cwd ?? '',
+      env: canonicalStringRecord(server.transport.env),
+    },
     headers: server.headers,
-    secrets: server.secrets,
+    secrets: server.secrets.map((secret) => ({
+      kind: secret.kind,
+      headerName: secret.headerName ?? '',
+      username: secret.username ?? '',
+      value: secret.value,
+    })),
     timeouts: server.timeouts,
     limits: server.limits,
   });
+}
+
+function canonicalStringRecord(value: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(value ?? {}).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function headerArrayValue(value: unknown): McpHeaderValue[] {

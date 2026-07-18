@@ -15,6 +15,7 @@ import {
   migrateMcpStorageState,
 } from '../core/mcp/storage-codec';
 import {
+  MCP_CACHE_ENTRY,
   MCP_SERVER_IDS,
   MCP_STORAGE_CORRUPT_SERVER,
   MCP_STORAGE_DUPLICATE_SERVER,
@@ -111,6 +112,27 @@ describe('MCP persisted-config contract', () => {
 
     await expect(getAllMcpServers()).resolves.toHaveLength(MCP_STORAGE_V2.servers.length);
     expect(storageSet).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a sparse persisted connection cache after discovery health updates', async () => {
+    const sparseState = structuredClone(MCP_STORAGE_V2);
+    const shellServer = sparseState.servers.find((server) => server.id === MCP_SERVER_IDS.shell);
+    if (!shellServer) throw new Error('Missing Shell MCP fixture.');
+    delete shellServer.secrets[0].id;
+    storage[MCP_STORAGE_KEY] = sparseState;
+
+    await updateMcpServer(MCP_SERVER_IDS.shell, {
+      status: 'ready',
+      lastConnectedAt: MCP_STORAGE_V2.toolCaches[0].health.checkedAt + 1,
+      lastError: null,
+    });
+
+    const state = decodeMcpStorageState(storage[MCP_STORAGE_KEY]);
+    expect(state.toolCaches).toEqual([MCP_CACHE_ENTRY]);
+    expect(state.servers.find((server) => server.id === MCP_SERVER_IDS.shell)).toMatchObject({
+      id: MCP_SERVER_IDS.shell,
+      status: 'ready',
+    });
   });
 
   it('accepts current v2 cache collisions so the user can clear or refresh them', () => {
