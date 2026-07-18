@@ -206,6 +206,18 @@ describe('runtime sender and envelope boundary', () => {
     expect(projectSidebar).toContain('createExtensionRuntimeMessageContext(sender');
     expect(offscreen).toContain('createExtensionRuntimeMessageContext(port.sender ?? {}');
   });
+
+  it('keeps content runtime receivers response-silent for content-origin requests', () => {
+    const content = readFileSync('entrypoints/content.ts', 'utf8');
+    const start = content.indexOf('function handleContentRuntimeMessage(');
+    const end = content.indexOf('\nasync function disconnectMainWorldRuntimeState', start);
+    const receiver = content.slice(start, end);
+
+    expect(receiver).toContain('createExtensionRuntimeMessageContext(sender');
+    expect(receiver).toContain('if (error instanceof RuntimeBoundaryError) return undefined;');
+    expect(receiver).toContain(`  } catch (error) {\n    // runtime.sendMessage reaches every extension context. A content receiver\n    // must not answer a content-to-background RPC before the background does.`);
+    expect(receiver).not.toContain('createRuntimeBoundaryErrorResponse');
+  });
 });
 
 function expectInOrder(source: string, fragments: string[]): void {
