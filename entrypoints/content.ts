@@ -125,8 +125,8 @@ import {
 import {
   BACKGROUND_RUNTIME_PATHNAMES,
   createExtensionRuntimeMessageContext,
-  createRuntimeBoundaryErrorResponse,
   decodeRuntimeMessageEnvelope,
+  RuntimeBoundaryError,
 } from '../core/messaging/runtime-boundary';
 import {
   isToolDescriptorRecord,
@@ -982,14 +982,22 @@ function handleContentRuntimeMessage(
   let envelope;
   try {
     envelope = decodeRuntimeMessageEnvelope(message);
+  } catch (error) {
+    if (error instanceof RuntimeBoundaryError) return undefined;
+    throw error;
+  }
+
+  try {
     createExtensionRuntimeMessageContext(sender, {
       runtimeId: chrome.runtime.id,
       extensionOrigin: chrome.runtime.getURL('/'),
       allowedPathnames: BACKGROUND_RUNTIME_PATHNAMES,
     });
   } catch (error) {
-    sendResponse(createRuntimeBoundaryErrorResponse(error, envelope));
-    return false;
+    // runtime.sendMessage reaches every extension context. A content receiver
+    // must not answer a content-to-background RPC before the background does.
+    if (error instanceof RuntimeBoundaryError) return undefined;
+    throw error;
   }
   if (message.type === 'STATE_UPDATED') {
     try {
