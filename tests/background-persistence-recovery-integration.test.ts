@@ -44,7 +44,7 @@ describe('background persistence recovery composition', () => {
     });
     const firstBarrier = createSyncRecoveryBarrier({
       recover: firstCoordinator.recover,
-      notifyReady: async () => undefined,
+      notifyRecovered: async () => undefined,
     });
     const firstRunner = createTrackedLocalStateMutationRunner({
       runWithRecovery: createRunWithRecovery(firstCoordinator),
@@ -74,7 +74,7 @@ describe('background persistence recovery composition', () => {
     const restartEvents: string[] = [];
     const restartBarrier = createSyncRecoveryBarrier({
       recover: restartCoordinator.recover,
-      notifyReady: async (result) => {
+      notifyRecovered: async (result) => {
         restartEvents.push(result.recovered ? 'recovered' : 'ready');
       },
     });

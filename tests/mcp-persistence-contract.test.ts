@@ -6,6 +6,7 @@ import {
   getAllMcpServers,
   getMcpServerById,
   updateMcpServer,
+  updateMcpServerHealth,
 } from '../core/mcp/store';
 import {
   decodeMcpStorageState,
@@ -121,7 +122,7 @@ describe('MCP persisted-config contract', () => {
     delete shellServer.secrets[0].id;
     storage[MCP_STORAGE_KEY] = sparseState;
 
-    await updateMcpServer(MCP_SERVER_IDS.shell, {
+    await updateMcpServerHealth(MCP_SERVER_IDS.shell, {
       status: 'ready',
       lastConnectedAt: MCP_STORAGE_V2.toolCaches[0].health.checkedAt + 1,
       lastError: null,
@@ -133,6 +134,45 @@ describe('MCP persisted-config contract', () => {
       id: MCP_SERVER_IDS.shell,
       status: 'ready',
     });
+  });
+
+  it('keeps valid sparse configuration untouched while recording health', async () => {
+    const sparseState = structuredClone(MCP_STORAGE_V2);
+    const shellServer = sparseState.servers.find((server) => server.id === MCP_SERVER_IDS.shell);
+    if (!shellServer) throw new Error('Missing Shell MCP fixture.');
+    shellServer.secrets = [{ kind: 'bearer', value: '' }];
+    storage[MCP_STORAGE_KEY] = sparseState;
+
+    await updateMcpServerHealth(MCP_SERVER_IDS.shell, {
+      status: 'error',
+      lastError: 'connection refused',
+    });
+
+    const state = decodeMcpStorageState(storage[MCP_STORAGE_KEY]);
+    expect(state.toolCaches).toEqual([MCP_CACHE_ENTRY]);
+    expect(state.servers.find((server) => server.id === MCP_SERVER_IDS.shell)).toMatchObject({
+      id: MCP_SERVER_IDS.shell,
+      secrets: [{ kind: 'bearer', value: '' }],
+      status: 'error',
+      lastError: 'connection refused',
+    });
+  });
+
+  it('keeps a disabled server disabled when discovery records connection health', async () => {
+    const disabledState = structuredClone(MCP_STORAGE_V2);
+    const shellServer = disabledState.servers.find((server) => server.id === MCP_SERVER_IDS.shell);
+    if (!shellServer) throw new Error('Missing Shell MCP fixture.');
+    shellServer.enabled = false;
+    shellServer.status = 'disabled';
+    storage[MCP_STORAGE_KEY] = disabledState;
+
+    await updateMcpServerHealth(MCP_SERVER_IDS.shell, {
+      status: 'ready',
+      lastConnectedAt: MCP_STORAGE_V2.toolCaches[0].health.checkedAt + 1,
+      lastError: null,
+    });
+
+    expect((await getMcpServerById(MCP_SERVER_IDS.shell))?.status).toBe('disabled');
   });
 
   it('accepts current v2 cache collisions so the user can clear or refresh them', () => {

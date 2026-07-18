@@ -9,7 +9,7 @@ describe('sync recovery barrier', () => {
     const onRecoveryFailure = vi.fn();
     const barrier = createSyncRecoveryBarrier({
       recover,
-      notifyReady: vi.fn(),
+      notifyRecovered: vi.fn(),
       onRecoveryFailure,
     });
 
@@ -26,7 +26,7 @@ describe('sync recovery barrier', () => {
     const notifyRecovered = vi.fn().mockRejectedValue(notificationError);
     const barrier = createSyncRecoveryBarrier({
       recover,
-      notifyReady: notifyRecovered,
+      notifyRecovered,
       onNotificationFailure,
     });
 
@@ -34,30 +34,20 @@ describe('sync recovery barrier', () => {
     await Promise.resolve();
     await expect(barrier.ensureReady()).resolves.toBeUndefined();
     expect(recover).toHaveBeenCalledOnce();
+    expect(notifyRecovered).toHaveBeenCalledWith({ recovered: true });
     expect(onNotificationFailure).toHaveBeenCalledWith(notificationError);
   });
 
-  it('waits for a state refresh even when the recovery check finds no journal', async () => {
-    let finishNotification!: () => void;
-    const notifyReady = vi.fn(() => new Promise<void>((resolve) => {
-      finishNotification = resolve;
-    }));
+  it('does not broadcast when the recovery check finds no journal', async () => {
+    const notifyRecovered = vi.fn();
     const barrier = createSyncRecoveryBarrier({
       recover: vi.fn().mockResolvedValue({ recovered: false }),
-      notifyReady,
+      notifyRecovered,
     });
 
-    const ready = barrier.ensureReady();
-    const settled = vi.fn();
-    void ready.then(settled);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(notifyReady).toHaveBeenCalledWith({ recovered: false });
-    expect(settled).not.toHaveBeenCalled();
+    await expect(barrier.ensureReady()).resolves.toBeUndefined();
 
-    finishNotification();
-    await ready;
-    expect(settled).toHaveBeenCalledOnce();
+    expect(notifyRecovered).not.toHaveBeenCalled();
   });
 
   it('blocks later dispatch on recovery after a failed apply', async () => {
@@ -67,7 +57,7 @@ describe('sync recovery barrier', () => {
     }));
     const barrier = createSyncRecoveryBarrier({
       recover,
-      notifyReady: vi.fn().mockResolvedValue(undefined),
+      notifyRecovered: vi.fn().mockResolvedValue(undefined),
     });
 
     const apply = barrier.trackApply(Promise.reject(new Error('apply failed')));

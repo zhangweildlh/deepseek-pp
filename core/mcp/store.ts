@@ -126,6 +126,40 @@ export async function updateMcpServer(
   });
 }
 
+/**
+ * Records connection health without treating it as a configuration mutation.
+ *
+ * Discovery writes its cache immediately before this update. Running the
+ * configuration normalizer here can alter a valid legacy/sparse record and
+ * make the generic cache-invalidation path delete that freshly written cache.
+ */
+export async function updateMcpServerHealth(
+  id: McpServerId,
+  patch: Partial<Pick<McpServerConfig, 'status' | 'lastConnectedAt' | 'lastError'>>,
+): Promise<McpServerConfig | null> {
+  return mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    let updated: McpServerConfig | null = null;
+    const servers = state.servers.map((server) => {
+      if (server.id !== id) return server;
+      updated = {
+        ...server,
+        status: resolveMcpServerHealthStatus(server, patch),
+        lastConnectedAt: patch.lastConnectedAt === undefined
+          ? server.lastConnectedAt
+          : patch.lastConnectedAt,
+        lastError: patch.lastError === undefined ? server.lastError : patch.lastError,
+        updatedAt: Date.now(),
+      };
+      return updated;
+    });
+
+    if (!updated) return null;
+    await writeStateAlreadyOwned({ ...state, servers });
+    return sanitizeMcpServerConfig(updated);
+  });
+}
+
 export async function deleteMcpServer(id: McpServerId): Promise<void> {
   await mcpStorageOperations.run(async () => {
     const state = await readStateAlreadyOwned();
@@ -255,12 +289,20 @@ function normalizeServerForMutation(raw: unknown): McpServerConfig {
 
 function resolvePatchedServerStatus(
   server: McpServerConfig,
-  patch: McpServerUpdateInput,
+  patch: Pick<McpServerUpdateInput, 'enabled' | 'status'>,
 ): McpServerStatus {
   if (patch.enabled === false) return 'disabled';
   if (patch.status) return patch.status;
   if (patch.enabled === true && (!server.enabled || server.status === 'disabled')) return 'unknown';
   return server.status;
+}
+
+function resolveMcpServerHealthStatus(
+  server: McpServerConfig,
+  patch: Partial<Pick<McpServerConfig, 'status'>>,
+): McpServerStatus {
+  if (!server.enabled) return 'disabled';
+  return patch.status ?? server.status;
 }
 
 function normalizeServerStatus(

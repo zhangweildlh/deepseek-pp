@@ -1072,6 +1072,7 @@ export const zhCN = {
       invalidFormat: '工具格式错误',
       unknownTool: '未知工具',
       authorizationRejected: '工具授权被拒绝',
+      sessionBindingUnavailable: '新对话未能及时获得浏览器会话路由。请等待聊天地址更新后重试。',
       incomplete: '响应已结束，但该工具调用尚未完成。',
     },
     memory: {

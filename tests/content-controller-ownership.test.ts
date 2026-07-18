@@ -38,6 +38,11 @@ describe('Content controller ownership contract', () => {
     expect(contentSource).not.toContain('toolBlockRouteTimer');
   });
 
+  it('waits for the shared navigation event before executing an unbound new-chat tool', () => {
+    expect(contentSource).toContain('bindNewChatToolCallToBrowserSession(call, grant?.chatSessionId');
+    expect(contentSource).toContain("from './content/tool-session-binding'");
+  });
+
   it('routes both worlds through the shared document lifecycle instead of entrypoint listeners', () => {
     expect(contentSource).toContain('replaceContentDocumentLifecycle({');
     expect(mainWorldSource).toContain('replaceContentDocumentLifecycle({');

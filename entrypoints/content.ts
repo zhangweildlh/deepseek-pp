@@ -39,6 +39,7 @@ import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../cor
 import { createRestoredArtifactToolResult } from '../core/artifact';
 import type { ResponseCompletePayload, ResponseTokenSpeedPayload } from '../core/interceptor/fetch-hook';
 import { shouldIgnoreEmptyTokenSpeedProgress } from '../core/deepseek/stream-metrics';
+import { readDeepSeekChatSessionId } from '../core/deepseek/chat-session';
 import { createUsageProgressWriteCoordinator } from '../core/usage/progress-write-coordinator';
 import { runInlineAgentLoop } from '../core/inline-agent/loop';
 import {
@@ -176,6 +177,7 @@ import {
   type ContentMutationHub,
 } from './content/controllers/mutation-hub';
 import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
+import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
 
 const TOOL_BLOCK_ID = 'dpp-tool-block';
 const TOOL_BLOCK_STYLE_ID = 'dpp-tool-block-css';
@@ -1960,13 +1962,7 @@ function updateConversationExportProgress(progress: ConversationExportProgress |
 }
 
 function getCurrentChatSessionId(): string | null {
-  const match = location.pathname.match(/\/(?:a\/)?chat\/s\/([^/?#]+)/);
-  if (!match?.[1]) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
+  return readDeepSeekChatSessionId(location.pathname);
 }
 
 function getCurrentConversationTitle(): string {
@@ -5076,16 +5072,23 @@ async function executeToolCall(
     };
   }
 
-  const authorization = authorizationId ?? getToolAuthorizationForCall(call)?.id;
-  const result = await sendRuntimeToolCallMessage(call, authorization);
+  const grant = getToolAuthorizationForCall(call);
+  const authorization = authorizationId ?? grant?.id;
+  const executionCall = await bindNewChatToolCallToBrowserSession(call, grant?.chatSessionId, {
+    readChatSessionId: getCurrentChatSessionId,
+    signal: toolCapabilityScope?.signal,
+  });
+  if (!executionCall) return createUnboundToolSessionResult(call);
+
+  const result = await sendRuntimeToolCallMessage(executionCall, authorization);
   const normalized = normalizeRuntimeToolCallResult(result);
 
   if (normalized) {
-    if (shouldRequestWebFetchPermission(call, normalized)) {
-      const url = call.payload?.url;
+    if (shouldRequestWebFetchPermission(executionCall, normalized)) {
+      const url = executionCall.payload?.url;
       const granted = typeof url === 'string' ? await requestWebFetchPermission(url) : false;
       if (granted) {
-        const retryResult = await sendRuntimeToolCallMessage(call, authorization);
+        const retryResult = await sendRuntimeToolCallMessage(executionCall, authorization);
         const retryNormalized = normalizeRuntimeToolCallResult(retryResult);
         if (retryNormalized) return retryNormalized;
       }
@@ -5100,7 +5103,24 @@ async function executeToolCall(
       detail: contentT('content.extensionReloaded'),
     };
   }
-  return createInvalidRuntimeToolResult(call, result);
+  return createInvalidRuntimeToolResult(executionCall, result);
+}
+
+function createUnboundToolSessionResult(call: ToolCall): ToolCardResult {
+  const detail = contentT('tool.runtime.sessionBindingUnavailable');
+  return {
+    ok: false,
+    name: call.name,
+    provider: call.provider,
+    descriptorId: call.descriptorId,
+    summary: contentT('tool.runtime.authorizationRejected'),
+    detail,
+    error: {
+      code: 'tool_session_unavailable',
+      message: detail,
+      retryable: true,
+    },
+  };
 }
 
 async function sendRuntimeToolCallMessage(

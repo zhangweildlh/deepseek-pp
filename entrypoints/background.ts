@@ -334,7 +334,7 @@ const chatRuntimeService = createChatRuntimeService({
 });
 const syncLocalRecoveryBarrier = createSyncRecoveryBarrier({
   recover: recoverPendingSyncLocalApply,
-  async notifyReady() {
+  async notifyRecovered() {
     await Promise.all([
       broadcastStateUpdate(),
       broadcastProjectContextUpdate(),

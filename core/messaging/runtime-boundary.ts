@@ -1,3 +1,5 @@
+import { readDeepSeekChatSessionId } from '../deepseek/chat-session';
+
 export const RUNTIME_BOUNDARY_ERROR_CODES = {
   invalidMessage: 'runtime_message_invalid',
   unauthorizedSender: 'runtime_message_unauthorized',
@@ -168,7 +170,7 @@ export function createRuntimeMessageContext(
     documentId: validDocumentId(sender.documentId),
     documentLifecycle: sender.documentLifecycle,
     documentSessionId: createDocumentSessionId('deepseek_content', sender, senderUrl, frameId ?? 0),
-    chatSessionId: readDeepSeekChatSessionId(senderUrl),
+    chatSessionId: readDeepSeekChatSessionId(senderUrl) ?? undefined,
   };
 }
 
@@ -270,16 +272,6 @@ function validOptionalFrameId(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
   throwUnauthorized('Runtime sender frame is invalid.');
-}
-
-function readDeepSeekChatSessionId(senderUrl: string): string | undefined {
-  const match = new URL(senderUrl).pathname.match(/^\/(?:a\/)?chat\/s\/([^/]+)/);
-  if (!match) return undefined;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return undefined;
-  }
 }
 
 function validDocumentId(value: unknown): string | undefined {

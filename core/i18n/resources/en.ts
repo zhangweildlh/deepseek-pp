@@ -1072,6 +1072,7 @@ export const en = {
       invalidFormat: 'Invalid tool format',
       unknownTool: 'Unknown tool',
       authorizationRejected: 'Tool authorization rejected',
+      sessionBindingUnavailable: 'The new conversation did not receive a browser-owned session route in time. Please wait for the chat URL to update and try again.',
       incomplete: 'The response ended before this tool call completed.',
     },
     memory: {

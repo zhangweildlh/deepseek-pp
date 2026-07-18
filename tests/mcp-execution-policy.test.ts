@@ -9,6 +9,7 @@ import {
   saveMcpToolCache,
   updateMcpServer,
 } from '../core/mcp/store';
+import { MCP_STORAGE_KEY } from '../core/mcp/storage-codec';
 import { renderToolSchemas } from '../core/prompt/augmentation';
 import type { McpServerConfig, ToolCall, ToolDescriptor } from '../core/types';
 
@@ -110,6 +111,14 @@ describe('MCP execution policy', () => {
       },
     });
 
+    const sparseState = structuredClone(storage[MCP_STORAGE_KEY]) as {
+      servers: Array<{ id: string; secrets: unknown }>;
+    };
+    const sparseServer = sparseState.servers.find((item) => item.id === server.id);
+    if (!sparseServer) throw new Error('Missing persisted MCP server.');
+    sparseServer.secrets = [{ kind: 'bearer', value: '' }];
+    storage[MCP_STORAGE_KEY] = sparseState;
+
     const cache = await refreshMcpServerDiscovery(server.id);
 
     expect(cache.health.status).toBe('ready');
@@ -120,6 +129,13 @@ describe('MCP execution policy', () => {
     });
     const persistedDescriptors = await getMcpToolDescriptors({ includeDisabled: true });
     expect(renderToolSchemas(persistedDescriptors)).toContain('"enum":["playwright","filesystem"]');
+    expect(await getMcpToolCache(server.id)).toMatchObject({
+      serverId: server.id,
+      descriptors: [expect.objectContaining({ name: 'sample_tool' })],
+      health: { status: 'ready', toolCount: 1 },
+    });
+    expect((storage[MCP_STORAGE_KEY] as { servers: Array<{ id: string; secrets: unknown }> }).servers
+      .find((item) => item.id === server.id)?.secrets).toEqual([{ kind: 'bearer', value: '' }]);
     expect(requests.map((request) => request.method)).toEqual([
       'initialize',
       'notifications/initialized',

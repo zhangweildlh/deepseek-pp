@@ -17,6 +17,7 @@ import type {
   ToolResult,
 } from '../core/tool/types';
 import { createWebSearchToolDescriptors } from '../core/tool/web-search';
+import { bindNewChatToolCallToBrowserSession } from '../entrypoints/content/tool-session-binding';
 import { executeRuntimeToolCall } from './helpers/production-tool-runtime';
 
 let sessionStorage: Record<string, unknown>;
@@ -497,6 +498,41 @@ describe('tool authorization context', () => {
       { kind: 'grant', grantId: grant.id, subject: { ...SUBJECT, chatSessionId: 'chat-other' } },
       [descriptor],
     )).resolves.toMatchObject({ descriptor });
+  });
+
+  it('binds a streamed new-chat tool call to the navigation-owned browser route', async () => {
+    const descriptor = makeDescriptor();
+    const newChatSubject = { ...SUBJECT, chatSessionId: null };
+    const grant = await createToolAuthorization({
+      requestId: 'request-1',
+      trigger: 'manual_chat',
+      chatSessionId: 'page-claimed-session',
+      subject: newChatSubject,
+      descriptors: [descriptor],
+    });
+    const target = new EventTarget();
+    let browserSessionId: string | null = null;
+    const pending = bindNewChatToolCallToBrowserSession(makeCall({
+      source: { trigger: 'manual_chat', requestId: 'request-1', chatSessionId: 'page-claimed-session' },
+    }), grant.chatSessionId, {
+      target,
+      timeoutMs: 100,
+      readChatSessionId: () => browserSessionId,
+    });
+
+    browserSessionId = 'chat-1';
+    target.dispatchEvent(new Event('dpp:navigation'));
+    const call = await pending;
+    if (!call) throw new Error('Expected the browser-owned route to bind the tool call.');
+
+    await expect(authorizeToolExecution(
+      call,
+      { kind: 'grant', grantId: grant.id, subject: SUBJECT },
+      [descriptor],
+    )).resolves.toMatchObject({
+      descriptor,
+      call: { source: { chatSessionId: 'chat-1' } },
+    });
   });
 
   it('atomically rejects sequential and concurrent replay', async () => {

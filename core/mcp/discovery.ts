@@ -7,7 +7,7 @@ import {
   getMcpServerById,
   getMcpToolCache,
   saveMcpToolCache,
-  updateMcpServer,
+  updateMcpServerHealth,
 } from './store';
 import { createMcpTransport } from './transports';
 import type {
@@ -251,7 +251,7 @@ async function discoverServerTools(
       health,
     };
     await saveMcpToolCache(entry);
-    await updateMcpServer(server.id, {
+    await updateMcpServerHealth(server.id, {
       status: 'ready',
       lastConnectedAt: completedAt,
       lastError: null,
@@ -277,7 +277,7 @@ async function discoverServerTools(
       health,
     };
     await saveMcpToolCache(entry);
-    await updateMcpServer(server.id, {
+    await updateMcpServerHealth(server.id, {
       status: 'error',
       lastError: message,
     });

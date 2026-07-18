@@ -85,6 +85,7 @@ export {
   saveMcpToolCache,
   sanitizeMcpServerConfig,
   updateMcpServer,
+  updateMcpServerHealth,
 } from './store';
 
 export {
