@@ -78,8 +78,13 @@ export interface McpToolsController {
   requestHostPermission(origins: string[]): Promise<boolean>;
 }
 
+export interface SidepanelHostPermissionPort {
+  request(origins: readonly string[]): Promise<boolean>;
+}
+
 export function createMcpToolsController(
   runtimeClient: SidepanelRuntimeClient = sidepanelRuntimeClient,
+  hostPermissions: SidepanelHostPermissionPort = sidepanelHostPermissionPort,
 ): McpToolsController {
   const loadMcpServerState = async () => {
     const [servers, platform] = await Promise.all([
@@ -199,24 +204,23 @@ export function createMcpToolsController(
       { type: 'DIAGNOSE_WEB_SEARCH', payload: { query } },
       { decode: decodeWebSearchDiagnostics },
     ),
-    async requestHostPermission(origins) {
-      return runtimeClient.request(
-        { type: 'REQUEST_HOST_PERMISSION', payload: { origins } },
-        {
-          acceptFailure: true,
-          decode(value) {
-            const record = requireRecord(value, 'REQUEST_HOST_PERMISSION response');
-            if (typeof record.ok !== 'boolean') {
-              throw new Error('REQUEST_HOST_PERMISSION response.ok must be a boolean.');
-            }
-            return record.ok;
-          },
-        },
-      );
+    requestHostPermission(origins) {
+      // chrome.permissions.request must be called synchronously from the
+      // sidepanel click handler to preserve Chrome's required user gesture.
+      return hostPermissions.request(origins);
     },
   };
   return Object.freeze(controller);
 }
+
+const sidepanelHostPermissionPort: SidepanelHostPermissionPort = Object.freeze({
+  request(origins: readonly string[]) {
+    if (!chrome.permissions?.request) {
+      throw new Error('Browser host permission requests are unavailable.');
+    }
+    return chrome.permissions.request({ origins: [...origins] });
+  },
+});
 
 export const mcpToolsController = createMcpToolsController();
 

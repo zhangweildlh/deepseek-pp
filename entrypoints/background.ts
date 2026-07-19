@@ -234,9 +234,11 @@ import {
   createRuntimeBoundaryErrorResponse,
   createRuntimeMessageContext,
   decodeRuntimeMessageEnvelope,
+  RuntimeBoundaryError,
   type RuntimeMessageContext,
   type RuntimeMessageEnvelope,
 } from '../core/messaging/runtime-boundary';
+import { requiresCurrentToolAuthorizationSubject } from '../core/messaging/tool-runtime-contracts';
 import { createRuntimeCommandRegistry } from '../core/messaging/runtime-command-registry';
 import { createBootstrapRuntimeHandlers } from './background/bootstrap-handlers';
 import { createTrackedLocalStateMutationRunner } from './background/local-state-mutation-runner';
@@ -250,6 +252,7 @@ import {
 } from './background/chat-runtime-service';
 import { createDeepSeekRuntimeHandlers } from './background/deepseek-runtime-handlers';
 import { createBackgroundRuntimeHandlers } from './background/background-runtime-handlers';
+import { refreshRuntimeMessageContextFromBrowserTab } from './background/runtime-message-context';
 import { refreshDeepSeekAuthFromTabs } from './background/deepseek-auth-refresh';
 import { createSyncRuntimeService } from './background/sync-runtime-service';
 import {
@@ -690,14 +693,24 @@ export default defineBackground(() => {
       return false;
     }
 
-    syncLocalRecoveryBarrier.ensureReady()
-      .then(() => handleMessage(envelope, context))
+    const contextForDispatch = requiresCurrentToolAuthorizationSubject(envelope.type)
+      ? refreshRuntimeMessageContextFromBrowserTab(context, {
+        tabs: chrome.tabs,
+        deepSeekOrigin: new URL(DEEPSEEK_HOME_URL).origin,
+      })
+      : Promise.resolve(context);
+
+    contextForDispatch
+      .then((currentContext) => syncLocalRecoveryBarrier.ensureReady()
+        .then(() => handleMessage(envelope, currentContext)))
       .then(sendResponse)
-      .catch((error) => sendResponse(createBackgroundErrorResponse(
-        envelope,
-        error,
-        backgroundT('content.toolBlock.summaries.backgroundFailed'),
-      )));
+      .catch((error) => sendResponse(error instanceof RuntimeBoundaryError
+        ? createRuntimeBoundaryErrorResponse(error, envelope)
+        : createBackgroundErrorResponse(
+          envelope,
+          error,
+          backgroundT('content.toolBlock.summaries.backgroundFailed'),
+        )));
     return true;
   });
 

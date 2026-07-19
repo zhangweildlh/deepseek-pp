@@ -9,6 +9,7 @@ import {
   createRuntimeMessageContext,
   decodeRuntimeMessageEnvelope,
   DEEPSEEK_CONTENT_RUNTIME_COMMANDS,
+  refreshDeepSeekContentRuntimeContext,
   RUNTIME_BOUNDARY_ERROR_CODES,
   type RuntimeMessageSenderLike,
 } from '../core/messaging/runtime-boundary';
@@ -90,9 +91,10 @@ describe('runtime sender and envelope boundary', () => {
     });
   });
 
-  it('accepts a same-origin DeepSeek route change for an existing content document', () => {
+  it('uses the browser-owned current tab route across a same-origin DeepSeek SPA navigation', () => {
     const context = createRuntimeMessageContext({
       ...DEEPSEEK_SENDER,
+      url: 'https://chat.deepseek.com/',
       tab: {
         id: 17,
         url: 'https://chat.deepseek.com/a/chat/s/new-session',
@@ -101,11 +103,43 @@ describe('runtime sender and envelope boundary', () => {
 
     expect(context).toMatchObject({
       surface: 'deepseek_content',
-      senderUrl: DEEPSEEK_SENDER.url,
+      senderUrl: 'https://chat.deepseek.com/',
       tabUrl: 'https://chat.deepseek.com/a/chat/s/new-session',
       documentSessionId: 'deepseek-document-1',
-      chatSessionId: 'session-contract',
+      chatSessionId: 'new-session',
     });
+  });
+
+  it('refreshes a stale sender tab snapshot from the current browser tab before grant binding', () => {
+    const staleContext = createRuntimeMessageContext({
+      ...DEEPSEEK_SENDER,
+      url: 'https://chat.deepseek.com/',
+      tab: {
+        id: 17,
+        url: 'https://chat.deepseek.com/',
+      },
+    }, POLICY);
+
+    const context = refreshDeepSeekContentRuntimeContext(staleContext, {
+      id: 17,
+      url: 'https://chat.deepseek.com/a/chat/s/live-session',
+    }, POLICY);
+
+    expect(context).toMatchObject({
+      senderUrl: 'https://chat.deepseek.com/',
+      documentSessionId: 'deepseek-document-1',
+      tabUrl: 'https://chat.deepseek.com/a/chat/s/live-session',
+      chatSessionId: 'live-session',
+    });
+  });
+
+  it.each([
+    ['another tab', { id: 18, url: 'https://chat.deepseek.com/a/chat/s/live-session' }],
+    ['another origin', { id: 17, url: 'https://example.test/a/chat/s/live-session' }],
+    ['missing URL', { id: 17 }],
+  ])('rejects a refreshed browser tab from %s', (_name, tab) => {
+    const context = createRuntimeMessageContext(DEEPSEEK_SENDER, POLICY);
+    expect(() => refreshDeepSeekContentRuntimeContext(context, tab, POLICY)).toThrow();
   });
 
   it('accepts a missing Firefox frameId only with matching top-level tab evidence', () => {
@@ -196,7 +230,7 @@ describe('runtime sender and envelope boundary', () => {
       'decodeRuntimeMessageEnvelope(message)',
       'createRuntimeMessageContext(sender',
       'authorizeRuntimeMessage(envelope, context)',
-      'handleMessage(envelope, context)',
+      'handleMessage(envelope, currentContext)',
     ]);
     expectInOrder(content, [
       'decodeRuntimeMessageEnvelope(message)',

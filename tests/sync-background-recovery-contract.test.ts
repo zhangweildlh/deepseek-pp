@@ -27,7 +27,7 @@ describe('background sync recovery integration', () => {
   it('establishes the recovery barrier before startup mutation and runtime dispatch', () => {
     const startup = background.indexOf('void syncLocalRecoveryBarrier.ensureReady()');
     const archive = background.indexOf('.then(() => archiveStaleMemories()');
-    const runtimeDispatch = background.indexOf('.then(() => handleMessage(envelope, context))');
+    const runtimeDispatch = background.indexOf('.then(() => handleMessage(envelope, currentContext))');
     const automationScan = background.indexOf('.then(() => scanDueAutomationsFromWake()');
 
     expect(startup).toBeGreaterThan(-1);

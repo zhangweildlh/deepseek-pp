@@ -227,7 +227,9 @@ export default function ToolsPage() {
     settingsError,
     permState,
     permUrl,
+    permissionError,
     allSitesState,
+    allSitesError,
     pythonServer,
     pythonCache,
     pythonBusy,
@@ -345,7 +347,9 @@ export default function ToolsPage() {
           <StatusMessage tone="error">{t('sidepanel.toolsPage.permissionDenied')}</StatusMessage>
         )}
         {permState === 'error' && (
-          <StatusMessage tone="error">{t('sidepanel.toolsPage.permissionInvalidUrl')}</StatusMessage>
+          <StatusMessage tone="error">
+            {permissionError || t('sidepanel.toolsPage.permissionInvalidUrl')}
+          </StatusMessage>
         )}
 
         <div className="pt-1">
@@ -379,6 +383,14 @@ export default function ToolsPage() {
           <p className="text-[10px] mt-1.5 text-center" style={{ color: 'var(--ds-text-tertiary)' }}>
             {t('sidepanel.toolsPage.allSitesHelp')}
           </p>
+          {allSitesState === 'denied' && (
+            <StatusMessage tone="error">{t('sidepanel.toolsPage.permissionDenied')}</StatusMessage>
+          )}
+          {allSitesState === 'error' && (
+            <StatusMessage tone="error">
+              {allSitesError || t('sidepanel.toolsPage.permissionDenied')}
+            </StatusMessage>
+          )}
         </div>
       </SettingsSection>
     </div>

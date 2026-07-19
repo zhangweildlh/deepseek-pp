@@ -29,7 +29,9 @@ export function useToolsPageController(t: Translator) {
   const [settingsError, setSettingsError] = useState('');
   const [permState, setPermState] = useState<ToolPermissionState>('idle');
   const [permUrl, setPermUrl] = useState('');
+  const [permissionError, setPermissionError] = useState('');
   const [allSitesState, setAllSitesState] = useState<ToolPermissionState>('idle');
+  const [allSitesError, setAllSitesError] = useState('');
   const [pythonServer, setPythonServer] = useState<McpServerConfig | null>(null);
   const [pythonCache, setPythonCache] = useState<McpToolCacheEntry | null>(null);
   const [pythonBusy, setPythonBusy] = useState<PythonBusyState>('idle');
@@ -184,6 +186,7 @@ export function useToolsPageController(t: Translator) {
   const updatePermissionUrl = useCallback((value: string) => {
     setPermUrl(value);
     setPermState('idle');
+    setPermissionError('');
   }, []);
 
   const grantPermission = useCallback(async () => {
@@ -193,27 +196,32 @@ export function useToolsPageController(t: Translator) {
       origin = normalizeHostPermissionOrigin(permUrl);
     } catch {
       setPermState('error');
+      setPermissionError('');
       return;
     }
     setPermState('granting');
+    setPermissionError('');
     try {
       const granted = await mcpToolsController.requestHostPermission([origin]);
       setPermState(granted ? 'granted' : 'denied');
-    } catch {
-      setPermState('denied');
+    } catch (error) {
+      setPermState('error');
+      setPermissionError(getRuntimeErrorMessage(error));
     }
   }, [permUrl]);
 
   const grantAllSites = useCallback(async () => {
     setAllSitesState('granting');
+    setAllSitesError('');
     try {
       const granted = await mcpToolsController.requestHostPermission([
         'http://*/*',
         'https://*/*',
       ]);
       setAllSitesState(granted ? 'granted' : 'denied');
-    } catch {
-      setAllSitesState('denied');
+    } catch (error) {
+      setAllSitesState('error');
+      setAllSitesError(getRuntimeErrorMessage(error));
     }
   }, []);
 
@@ -222,7 +230,9 @@ export function useToolsPageController(t: Translator) {
     settingsError,
     permState,
     permUrl,
+    permissionError,
     allSitesState,
+    allSitesError,
     pythonServer,
     pythonCache,
     pythonBusy,

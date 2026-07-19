@@ -31,6 +31,22 @@ type DeclaredRuntimeRequest<TType extends MessageAction['type']> = Extract<
 type Ack = { ok: true };
 type DomainFailure = { ok: false; error: string };
 
+/**
+ * These commands authorize or consume a tool grant, so their receiver-owned
+ * chat identity must be refreshed from the current browser tab before they
+ * reach a privileged handler.
+ */
+export const TOOL_AUTHORIZATION_SUBJECT_RUNTIME_COMMANDS: ReadonlySet<string> = new Set([
+  'CREATE_TOOL_AUTHORIZATION',
+  'CLOSE_TOOL_AUTHORIZATION',
+  'APPEND_EXTERNAL_TOOL_PAYLOAD_CHUNK',
+  'EXECUTE_TOOL_CALL',
+]);
+
+export function requiresCurrentToolAuthorizationSubject(type: string): boolean {
+  return TOOL_AUTHORIZATION_SUBJECT_RUNTIME_COMMANDS.has(type);
+}
+
 export interface WebSearchDiagnostic {
   status: number;
   length: number;
