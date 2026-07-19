@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1113-release-highlights">1.11.3 Highlights</a>
+  <a href="#1114-release-highlights">1.11.4 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.3 Release Highlights](#1113-release-highlights)
+- [1.11.4 Release Highlights](#1114-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,22 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.3 Release Highlights
+## 1.11.4 Release Highlights
+
+1.11.4 focuses on tool authorization, post-tool continuation, and Windows Firefox native-host reliability, reducing interruptions caused by page transitions, permission confirmation, or multi-browser setup.
+
+| Area | Main changes |
+|------|--------------|
+| Tool authorization recovery | Fixes confirmed tools being rejected after creating, switching, or reloading a DeepSeek conversation; the side panel can again start the “authorize all sites” permission request. |
+| Tool continuation | Processes tool completion before terminal chat cleanup, reducing cases where web search or another tool runs once and the conversation does not continue. |
+| MCP tool recovery | Keeps discovered tools after a service-health update so a test or refresh cannot unexpectedly empty the tool list. |
+| Windows Firefox Shell MCP | Keeps a separate native-host manifest for each Windows browser so Firefox no longer overwrites a Chrome, Edge, or Chromium setup. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.3 - 0.2.0)</summary>
+
+### 1.11.3 Release Highlights
 
 1.11.3 focuses on MCP tool recovery and runtime stability, reducing interruptions when a service test succeeds but no tools are listed, or when chat and tool state is refreshed.
 
@@ -309,9 +324,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Local Skill import | Keeps the Shell MCP folder picker available for importing local Skill folders. |
 | Chat and tool stability | Makes normal chat and authorized tool connections more stable after a page refresh by preventing runtime state interference. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.2 - 0.2.0)</summary>
 
 ### 1.11.2 Release Highlights
 
