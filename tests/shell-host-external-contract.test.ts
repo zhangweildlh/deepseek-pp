@@ -165,6 +165,18 @@ describe('Shell Host installer external contract', () => {
     })).toThrow('Unsupported platform: future-os');
   });
 
+  it('keeps Windows browser manifests isolated while sharing the host runtime', () => {
+    const locations = SHELL_HOST_CONTRACT.browsers.map(browser => resolveNativeHostLocations({
+      os: 'win32',
+      browser,
+      home: 'C:\\Users\\contract',
+      localAppData: 'C:\\Users\\contract\\AppData\\Local',
+    }));
+
+    expect(new Set(locations.map(({ manifestPath }) => manifestPath)).size).toBe(locations.length);
+    expect(new Set(locations.map(({ hostInstallDir }) => hostInstallDir)).size).toBe(1);
+  });
+
   it('freezes Chromium origin and Firefox extension manifests', () => {
     const wrapperPath = '/contract/shell-mcp-host';
     for (const browser of ['chrome', 'chromium', 'edge']) {

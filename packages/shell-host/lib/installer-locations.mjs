@@ -44,11 +44,17 @@ export function resolveNativeHostLocations({ os, browser, home, localAppData }) 
   }
 
   const hostInstallDir = path.resolve(appDataRoot, os === 'linux' ? 'native-host' : 'NativeHost');
+  // Windows registers every supported browser from one shared app-data directory.
+  // Each browser needs its own manifest because Chromium and Firefox use
+  // incompatible authorization fields in that file.
+  const manifestFileName = os === 'win32'
+    ? `${HOST_NAME}.${browser}.json`
+    : `${HOST_NAME}.json`;
   return {
     appDataRoot,
     hostInstallDir,
     manifestDir,
-    manifestPath: path.resolve(manifestDir, `${HOST_NAME}.json`),
+    manifestPath: path.resolve(manifestDir, manifestFileName),
     registryKey: os === 'win32' ? getWindowsRegistryKey(browser) : null,
   };
 }
@@ -95,6 +101,7 @@ function getWindowsRegistryKey(browser) {
     case 'chrome': return `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${HOST_NAME}`;
     case 'edge': return `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${HOST_NAME}`;
     case 'chromium': return `HKCU\\Software\\Chromium\\NativeMessagingHosts\\${HOST_NAME}`;
+    case 'firefox': return `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`;
     default: return null;
   }
 }
