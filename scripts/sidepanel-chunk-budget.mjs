@@ -34,8 +34,16 @@ const WAVE_2_CHAT_BASELINE = Object.freeze({
   ChatPage: { raw: 134_902, gzip: 40_039 },
 });
 
+// gzip size may vary slightly between supported Node/zlib releases even when
+// the built JavaScript bytes are identical. Keep the raw baseline exact and
+// bound this encoder-only variance to a small fixed allowance.
+const GZIP_ENCODER_VARIANCE_BYTES = 256;
+
 const BUDGET = Object.freeze({
-  initialShell: BASELINE.initialShell,
+  initialShell: {
+    raw: BASELINE.initialShell.raw,
+    gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
+  },
   firstChatScreen: { raw: 400_000, gzip: 122_000 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
@@ -105,6 +113,7 @@ function verifyBrowserBuild(browser) {
   console.log(JSON.stringify({
     browser,
     baseline: BASELINE,
+    gzipEncoderVarianceBytes: GZIP_ENCODER_VARIANCE_BYTES,
     wave2ChatBaseline: WAVE_2_CHAT_BASELINE,
     current: {
       initialShell: initialMetric,
