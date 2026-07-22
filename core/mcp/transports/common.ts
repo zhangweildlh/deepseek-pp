@@ -34,17 +34,6 @@ export function getMcpOriginPattern(server: McpServerConfig): string {
   return `${url.protocol}//${url.host}/*`;
 }
 
-export async function requestMcpServerOriginPermission(server: McpServerConfig): Promise<boolean> {
-  const origins = [getMcpOriginPattern(server)];
-  if (!chrome.permissions?.request) return false;
-
-  const granted = chrome.permissions.contains
-    ? await chrome.permissions.contains({ origins }).catch(() => false)
-    : false;
-  if (granted) return true;
-  return chrome.permissions.request({ origins }).catch(() => false);
-}
-
 export async function hasMcpServerOriginPermission(server: McpServerConfig): Promise<boolean> {
   const origin = getMcpOriginPattern(server);
   if (!chrome.permissions?.contains) {

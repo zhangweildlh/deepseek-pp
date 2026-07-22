@@ -9,7 +9,6 @@ export {
   normalizeJsonRpcResponse,
   readJsonRpcResponse,
   readSseJsonRpcResponse,
-  requestMcpServerOriginPermission,
 } from './common';
 
 export type {

@@ -67,10 +67,14 @@ describe('shell native host local_folder_pick', () => {
 
 describe('shell native host startup', () => {
   it('does not block the host event loop on Windows PATH discovery', () => {
+    const hostSource = readFileSync(hostPath, 'utf8');
     const source = readFileSync(osAdapterPath, 'utf8');
 
     expect(source).toContain("import { execFile } from 'node:child_process';");
     expect(source).not.toContain('execFileSync');
+    expect(hostSource).toContain('const hostEnvironmentReady = Promise.resolve(');
+    expect(hostSource).toContain('createNativeEnvelopeDispatcher({');
+    expect(hostSource).toContain('hostEnvironmentReady,');
   });
 });
 

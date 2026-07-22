@@ -119,7 +119,6 @@ export {
   normalizeJsonRpcResponse,
   readJsonRpcResponse,
   readSseJsonRpcResponse,
-  requestMcpServerOriginPermission,
 } from './transports';
 
 export type {
