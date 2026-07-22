@@ -180,6 +180,104 @@ describe('MCP execution policy', () => {
     });
   });
 
+  it('keeps the last successful tool snapshot when a refresh fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('provider offline');
+    }));
+    const server = await createMcpServer({
+      displayName: 'Cached MCP',
+      enabled: true,
+      transport: { kind: 'http', url: 'http://127.0.0.1:48127/mcp' },
+    });
+    const descriptor = createMcpDescriptor(server, 'cached_tool');
+    await saveMcpToolCache({
+      serverId: server.id,
+      descriptors: [descriptor],
+      refreshedAt: 1_000,
+      expiresAt: 2_000,
+      health: {
+        serverId: server.id,
+        status: 'ready',
+        checkedAt: 1_000,
+        latencyMs: 10,
+        toolCount: 1,
+        error: null,
+      },
+    });
+
+    const failed = await refreshMcpServerDiscovery(server.id);
+
+    expect(failed).toMatchObject({
+      descriptors: [expect.objectContaining({ name: 'cached_tool' })],
+      refreshedAt: 1_000,
+      expiresAt: 2_000,
+      health: { status: 'error', toolCount: 1 },
+    });
+    await expect(getMcpToolCache(server.id)).resolves.toEqual(failed);
+    await expect(getMcpToolDescriptors({ includeDisabled: true })).resolves.toEqual([
+      expect.objectContaining({ name: 'cached_tool' }),
+    ]);
+    await expect(getMcpServerById(server.id)).resolves.toMatchObject({
+      status: 'error',
+      lastError: expect.stringContaining('Cannot reach MCP server'),
+    });
+  });
+
+  it('serializes discovery per server without poisoning the queue after failure', async () => {
+    const firstInitialize = deferred<Response>();
+    let initializeCount = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { id?: string; method: string };
+      if (request.method === 'initialize') {
+        initializeCount += 1;
+        if (initializeCount === 1) return firstInitialize.promise;
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id ?? null,
+          result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.method === 'notifications/initialized') {
+        return new Response(null, { status: 202 });
+      }
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id ?? null,
+        result: {
+          tools: [{
+            name: 'queued_tool',
+            description: 'Discovered after the failed refresh.',
+            inputSchema: { type: 'object', properties: {} },
+          }],
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const server = await createMcpServer({
+      displayName: 'Queued MCP',
+      enabled: true,
+      transport: { kind: 'http', url: 'http://127.0.0.1:48128/mcp' },
+    });
+
+    const first = refreshMcpServerDiscovery(server.id);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const second = refreshMcpServerDiscovery(server.id);
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    firstInitialize.reject(new TypeError('first refresh failed'));
+
+    await expect(first).resolves.toMatchObject({ health: { status: 'error' } });
+    await expect(second).resolves.toMatchObject({
+      descriptors: [expect.objectContaining({ name: 'queued_tool' })],
+      health: { status: 'ready', toolCount: 1 },
+    });
+    await expect(getMcpToolCache(server.id)).resolves.toMatchObject({
+      descriptors: [expect.objectContaining({ name: 'queued_tool' })],
+      health: { status: 'ready' },
+    });
+  });
+
   it('initializes Streamable HTTP sessions before executing cached tools', async () => {
     const requests: Array<{ method: string; headers: Headers }> = [];
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -342,4 +440,14 @@ function createMcpDescriptor(server: McpServerConfig, name = 'sample_tool'): Too
       maxResultBytes: 64_000,
     },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }

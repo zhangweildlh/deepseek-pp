@@ -226,7 +226,7 @@ export function useMcpPageController(t: Translator, confirm: Confirm) {
     setBusyState(server.id, 'permission');
     clearBanner();
     try {
-      const result = await mcpToolsController.requestServerPermission(server.id);
+      const result = await mcpToolsController.requestServerPermission(server);
       if (result.ok) {
         showBanner('success', t('sidepanel.mcpPage.messages.permissionGranted', {
           origin: result.origin ?? t('sidepanel.mcpPage.localHost'),

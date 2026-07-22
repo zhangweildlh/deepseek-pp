@@ -93,19 +93,41 @@ describe('sidepanel MCP and Tools controller', () => {
 
   it('owns permission-before-connect policy and does not retry after denial', async () => {
     const sendMessage = vi.fn(async (request: { type: string }) => {
-      if (request.type === 'REQUEST_MCP_SERVER_PERMISSION') {
-        return { ok: false, origin: 'https://example.test/*' };
-      }
       if (request.type === 'REFRESH_MCP_SERVER_TOOLS') return cache;
       throw new Error(`Unexpected command: ${request.type}`);
     });
-    const controller = createMcpToolsController(createSidepanelRuntimeClient(sendMessage));
+    const permissions = { request: vi.fn(async () => false) };
+    const controller = createMcpToolsController(
+      createSidepanelRuntimeClient(sendMessage),
+      permissions,
+    );
 
     await expect(controller.connectServer(server, 'refresh')).rejects.toMatchObject({
       name: 'McpPermissionError',
       origin: 'https://example.test/*',
     } satisfies Partial<McpPermissionError>);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(permissions.request).toHaveBeenCalledWith(['https://example.test/*']);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('requests MCP permission directly from the sidepanel before refreshing tools', async () => {
+    const sendMessage = vi.fn(async (request: { type: string }) => {
+      if (request.type === 'REFRESH_MCP_SERVER_TOOLS') return cache;
+      throw new Error(`Unexpected command: ${request.type}`);
+    });
+    const permissions = { request: vi.fn(async () => true) };
+    const controller = createMcpToolsController(
+      createSidepanelRuntimeClient(sendMessage),
+      permissions,
+    );
+
+    await expect(controller.connectServer(server, 'refresh')).resolves.toEqual(cache);
+    expect(permissions.request).toHaveBeenCalledWith(['https://example.test/*']);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'REFRESH_MCP_SERVER_TOOLS',
+      payload: { serverId: server.id },
+    });
   });
 
   it('requests host permission directly from the sidepanel click boundary', async () => {

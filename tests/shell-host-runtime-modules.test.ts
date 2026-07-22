@@ -168,6 +168,31 @@ describe('Shell Host modular runtime ownership', () => {
       },
     });
   });
+
+  it('serves control requests while a long tool call remains in the tool FIFO', async () => {
+    const command = process.platform === 'win32' ? 'Start-Sleep -Milliseconds 1200' : 'sleep 1.2';
+    const responses = await callHostResponses(resolve('packages/shell-host/native/shell-mcp-host.mjs'), [
+      {
+        protocol: 'deepseek-pp-mcp-native',
+        version: 1,
+        server: { id: 'concurrent-runtime' },
+        message: {
+          jsonrpc: '2.0',
+          id: 'slow',
+          method: 'tools/call',
+          params: { name: 'shell_exec', arguments: { command, timeout_ms: 3_000 } },
+        },
+      },
+      {
+        protocol: 'deepseek-pp-mcp-native',
+        version: 1,
+        server: { id: 'concurrent-runtime' },
+        message: { jsonrpc: '2.0', id: 'tools', method: 'tools/list' },
+      },
+    ]);
+
+    expect(responses.map((response) => response.id)).toEqual(['tools', 'slow']);
+  });
 });
 
 function createNativeFrame(message: unknown): Buffer {
@@ -208,6 +233,39 @@ function callHost(hostPath: string, envelope: unknown): Promise<any> {
       });
     });
     child.stdin.end(createNativeFrame(envelope));
+  });
+}
+
+function callHostResponses(hostPath: string, envelopes: unknown[]): Promise<any[]> {
+  const child = spawn(process.execPath, [hostPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+  return new Promise((resolveResponses, reject) => {
+    let stdout = Buffer.alloc(0);
+    const responses: any[] = [];
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Timed out waiting for concurrent Shell Host responses.'));
+    }, 5_000);
+    const finish = (callback: () => void) => {
+      clearTimeout(timer);
+      child.kill();
+      callback();
+    };
+    child.on('error', (error) => finish(() => reject(error)));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout = Buffer.concat([stdout, chunk]);
+      while (stdout.length >= 4) {
+        const length = stdout.readUInt32LE(0);
+        if (stdout.length < length + 4) return;
+        const body = stdout.subarray(4, length + 4).toString('utf8');
+        stdout = stdout.subarray(length + 4);
+        responses.push(JSON.parse(body));
+        if (responses.length === envelopes.length) {
+          finish(() => resolveResponses(responses));
+          return;
+        }
+      }
+    });
+    child.stdin.end(Buffer.concat(envelopes.map(createNativeFrame)));
   });
 }
 

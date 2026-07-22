@@ -32,21 +32,50 @@ const router = createNativeRouter({
   serverVersion: packageMetadata.version,
 });
 const channel = createNativeMessageChannel({ logLine: logger.logLine });
+const inFlight = new Set();
+let toolCallTail = Promise.resolve();
 
 async function main() {
   while (true) {
     const envelope = await channel.readMessage();
     if (envelope === NATIVE_EOF) break;
-    try {
-      const response = await router.handleEnvelope(envelope);
-      if (response) await channel.writeMessage(response);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.logLine(`Error: ${message}`);
-      await channel.writeMessage(jsonRpcError(null, -32603, message || 'Internal error'));
-    }
+    scheduleEnvelope(envelope);
   }
+  await Promise.allSettled([...inFlight]);
   sessionProvider.shutdown();
+}
+
+function scheduleEnvelope(envelope) {
+  const run = () => handleEnvelope(envelope);
+  const task = isToolCallEnvelope(envelope)
+    ? toolCallTail.then(run, run)
+    : run();
+  if (isToolCallEnvelope(envelope)) {
+    toolCallTail = task.then(() => undefined, () => undefined);
+  }
+  inFlight.add(task);
+  void task.then(
+    () => inFlight.delete(task),
+    () => inFlight.delete(task),
+  );
+}
+
+async function handleEnvelope(envelope) {
+  try {
+    const response = await router.handleEnvelope(envelope);
+    if (response) await channel.writeMessage(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.logLine(`Error: ${message}`);
+    await channel.writeMessage(jsonRpcError(null, -32603, message || 'Internal error'));
+  }
+}
+
+function isToolCallEnvelope(envelope) {
+  return envelope?.protocol === 'deepseek-pp-mcp-native'
+    && envelope?.version === 1
+    && envelope?.message?.jsonrpc === '2.0'
+    && envelope?.message?.method === 'tools/call';
 }
 
 main().catch(error => {

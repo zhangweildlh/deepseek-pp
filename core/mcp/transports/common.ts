@@ -36,15 +36,37 @@ export function getMcpOriginPattern(server: McpServerConfig): string {
 
 export async function requestMcpServerOriginPermission(server: McpServerConfig): Promise<boolean> {
   const origins = [getMcpOriginPattern(server)];
-  if (!chrome.permissions?.contains || !chrome.permissions?.request) return true;
+  if (!chrome.permissions?.request) return false;
 
-  const granted = await chrome.permissions.contains({ origins }).catch(() => false);
+  const granted = chrome.permissions.contains
+    ? await chrome.permissions.contains({ origins }).catch(() => false)
+    : false;
   if (granted) return true;
   return chrome.permissions.request({ origins }).catch(() => false);
 }
 
+export async function hasMcpServerOriginPermission(server: McpServerConfig): Promise<boolean> {
+  const origin = getMcpOriginPattern(server);
+  if (!chrome.permissions?.contains) {
+    throw new McpTransportError(
+      'mcp_origin_permission_check_unavailable',
+      `Host permission cannot be verified for ${origin}.`,
+      { retryable: false },
+    );
+  }
+  try {
+    return await chrome.permissions.contains({ origins: [origin] });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new McpTransportError(
+      'mcp_origin_permission_check_failed',
+      `Host permission could not be verified for ${origin}: ${message}`,
+    );
+  }
+}
+
 export async function ensureMcpServerOriginPermission(server: McpServerConfig): Promise<void> {
-  const granted = await requestMcpServerOriginPermission(server);
+  const granted = await hasMcpServerOriginPermission(server);
   if (!granted) {
     throw new McpTransportError(
       'mcp_origin_permission_denied',

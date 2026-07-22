@@ -18,11 +18,29 @@ import type {
 } from './types';
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
+const discoveryTails = new Map<McpServerId, Promise<void>>();
 
 export async function refreshMcpServerDiscovery(
   serverId: McpServerId,
   options?: { cacheTtlMs?: number; signal?: AbortSignal },
 ): Promise<McpToolCacheEntry> {
+  const previous = discoveryTails.get(serverId) ?? Promise.resolve();
+  const operation = previous.then(
+    () => discoverServerToolsById(serverId, options),
+    () => discoverServerToolsById(serverId, options),
+  );
+  const tail = operation.then(() => undefined, () => undefined);
+  discoveryTails.set(serverId, tail);
+  return operation.finally(() => {
+    if (discoveryTails.get(serverId) === tail) discoveryTails.delete(serverId);
+  });
+}
+
+async function discoverServerToolsById(
+  serverId: McpServerId,
+  options?: { cacheTtlMs?: number; signal?: AbortSignal },
+): Promise<McpToolCacheEntry> {
+  throwIfMcpExecutionAborted(options?.signal);
   const server = await getMcpServerById(serverId, { includeSecrets: true });
   if (!server) throw new Error(`MCP server not found: ${serverId}`);
   return discoverServerTools(server, options);
@@ -261,19 +279,23 @@ async function discoverServerTools(
     throwIfMcpExecutionAborted(options?.signal);
     const completedAt = Date.now();
     const message = err instanceof Error ? err.message : String(err);
+    const previousCache = await getMcpToolCache(server.id);
+    throwIfMcpExecutionAborted(options?.signal);
+    const descriptors = previousCache?.descriptors ?? [];
     const health: McpServerHealth = {
       serverId: server.id,
       status: 'error',
       checkedAt: completedAt,
       latencyMs: completedAt - startedAt,
-      toolCount: 0,
+      toolCount: descriptors.length,
       error: message,
     };
     const entry: McpToolCacheEntry = {
       serverId: server.id,
-      descriptors: [],
-      refreshedAt: completedAt,
-      expiresAt: completedAt + Math.min(options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, 30_000),
+      descriptors,
+      refreshedAt: previousCache?.refreshedAt ?? completedAt,
+      expiresAt: previousCache?.expiresAt
+        ?? completedAt + Math.min(options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, 30_000),
       health,
     };
     await saveMcpToolCache(entry);

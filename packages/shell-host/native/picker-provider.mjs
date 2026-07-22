@@ -1,13 +1,16 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { homedir, platform } from 'node:os';
+import { promisify } from 'node:util';
 import { DEFAULT_TIMEOUT_MS, WINDOWS_POWERSHELL_UTF8_PREAMBLE } from './contracts.mjs';
 import { resolveLocalPath, safeStat } from './file-provider.mjs';
+
+const execFileAsync = promisify(execFile);
 
 export function createPickerToolHandlers() {
   return [{ name: 'local_folder_pick', handle: createLocalFolderPickResult }];
 }
 
-function createLocalFolderPickResult(args) {
+async function createLocalFolderPickResult(args) {
   const title = typeof args?.title === 'string' && args.title.trim()
     ? args.title.trim()
     : 'Choose a local Skill folder';
@@ -16,7 +19,7 @@ function createLocalFolderPickResult(args) {
     : '';
 
   try {
-    const selectedPath = pickLocalFolder({ title, defaultPath });
+    const selectedPath = await pickLocalFolder({ title, defaultPath });
     const normalizedPath = resolveLocalPath(selectedPath);
     const selectedStat = safeStat(normalizedPath);
     if (!selectedStat || !selectedStat.isDirectory()) {
@@ -31,14 +34,14 @@ function createLocalFolderPickResult(args) {
   }
 }
 
-function pickLocalFolder({ title, defaultPath }) {
+async function pickLocalFolder({ title, defaultPath }) {
   const hostPlatform = platform();
   if (hostPlatform === 'darwin') return pickLocalFolderOnMac(title, defaultPath);
   if (hostPlatform === 'win32') return pickLocalFolderOnWindows(title, defaultPath);
   return pickLocalFolderOnLinux(title, defaultPath);
 }
 
-function pickLocalFolderOnMac(title, defaultPath) {
+async function pickLocalFolderOnMac(title, defaultPath) {
   const script = [
     'on run argv',
     '  set promptText to item 1 of argv',
@@ -51,12 +54,13 @@ function pickLocalFolderOnMac(title, defaultPath) {
     '  return POSIX path of chosenFolder',
     'end run',
   ].join('\n');
-  return execFileSync('osascript', ['-e', script, title, defaultPath || ''], {
+  const { stdout } = await execFileAsync('osascript', ['-e', script, title, defaultPath || ''], {
     encoding: 'utf8', timeout: DEFAULT_TIMEOUT_MS, windowsHide: true,
-  }).trim();
+  });
+  return stdout.trim();
 }
 
-function pickLocalFolderOnWindows(title, defaultPath) {
+async function pickLocalFolderOnWindows(title, defaultPath) {
   const script = [
     WINDOWS_POWERSHELL_UTF8_PREAMBLE,
     'Add-Type -AssemblyName System.Windows.Forms',
@@ -71,19 +75,20 @@ function pickLocalFolderOnWindows(title, defaultPath) {
     '  [Environment]::Exit(2)',
     '}',
   ].join('; ');
-  return execFileSync('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', encodePowerShellCommand(script)], {
+  const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-STA', '-EncodedCommand', encodePowerShellCommand(script)], {
     encoding: 'utf8',
     env: { ...process.env, DPP_FOLDER_PICK_TITLE: title, DPP_FOLDER_PICK_DEFAULT_PATH: defaultPath || '' },
     timeout: DEFAULT_TIMEOUT_MS,
     windowsHide: false,
-  }).trim();
+  });
+  return stdout.trim();
 }
 
 function encodePowerShellCommand(script) {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-function pickLocalFolderOnLinux(title, defaultPath) {
+async function pickLocalFolderOnLinux(title, defaultPath) {
   const linuxPickers = [
     {
       command: 'zenity',
@@ -94,9 +99,10 @@ function pickLocalFolderOnLinux(title, defaultPath) {
   const missing = [];
   for (const picker of linuxPickers) {
     try {
-      return execFileSync(picker.command, picker.args, {
+      const { stdout } = await execFileAsync(picker.command, picker.args, {
         encoding: 'utf8', timeout: DEFAULT_TIMEOUT_MS, windowsHide: true,
-      }).trim();
+      });
+      return stdout.trim();
     } catch (error) {
       if (error?.code === 'ENOENT') {
         missing.push(picker.command);

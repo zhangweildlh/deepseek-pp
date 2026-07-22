@@ -12,6 +12,7 @@ export function createNativeMessageChannel({
   let messageResolve = null;
   const messageQueue = [];
   let inputEnded = false;
+  let writeTail = Promise.resolve();
 
   function settleEnd() {
     inputEnded = true;
@@ -66,16 +67,18 @@ export function createNativeMessageChannel({
       return new Promise(resolve => { messageResolve = resolve; });
     },
     writeMessage(message) {
-      return new Promise(resolve => {
+      const write = () => new Promise(resolve => {
         const body = Buffer.from(JSON.stringify(message), 'utf8');
         if (body.length > Math.floor(MAX_NATIVE_MESSAGE_BYTES * 0.95)) {
           logLine(`writeNativeMessage WARNING body=${body.length} bytes approaches the ${MAX_NATIVE_MESSAGE_BYTES} native messaging cap; Chrome may truncate this response.`);
         }
         const header = Buffer.alloc(4);
         header.writeUInt32LE(body.length, 0);
-        output.write(header);
-        output.write(body, resolve);
+        output.write(Buffer.concat([header, body]), resolve);
       });
+      const result = writeTail.then(write, write);
+      writeTail = result.then(() => undefined, () => undefined);
+      return result;
     },
   };
 }
