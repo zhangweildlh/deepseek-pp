@@ -1,27 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { stripToolCallsFromHistory } from '../core/interceptor/history-cleanup';
+import { augmentRequestBody } from '../core/interceptor/request-augmentation';
 import { createArtifactToolDescriptors } from '../core/artifact';
 import { INLINE_AGENT_CONTINUATION_PLACEHOLDER } from '../core/inline-agent/prompt';
-import { markVisibleUserPrompt } from '../core/prompt/visibility';
 import { createDefaultToolDescriptors } from '../core/tool';
 
 describe('history cleanup', () => {
-  it('restores only the user input from a Skill-wrapped history turn', () => {
+  it('restores the exact no-argument Skill command without exposing instructions', () => {
+    const augmented = augmentRequestBody(JSON.stringify({
+      prompt: '/shell',
+      parent_message_id: null,
+      thinking_enabled: false,
+    }), {
+      memories: [],
+      skills: [{
+        name: 'shell',
+        instructions: 'Private Shell Skill instructions.',
+        memoryEnabled: false,
+      }],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: [],
+      messageCount: 0,
+      locale: 'en',
+    });
+    const storedPrompt = JSON.parse(augmented?.body ?? '{}').prompt;
     const json = {
       data: {
         biz_data: {
           chat_messages: [{
             message_id: 0,
             message_role: 'user',
-            content: markVisibleUserPrompt([
-              'Follow the private Skill instructions.',
-              '',
-              '---',
-              '',
-              'The following is the user input for this turn. Follow the instructions above when handling it:',
-              '',
-              'Inspect the project folder.',
-            ].join('\n')),
+            content: storedPrompt,
           }],
         },
       },
@@ -32,7 +42,7 @@ describe('history cleanup', () => {
       onToolCallsRestored: () => undefined,
     });
 
-    expect(json.data.biz_data.chat_messages[0].content).toBe('Inspect the project folder.');
+    expect(json.data.biz_data.chat_messages[0].content).toBe('/shell');
   });
 
   it('keeps inline-agent continuation prompt nodes but marks them as hidden internal turns', () => {

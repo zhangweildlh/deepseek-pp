@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { mutationMayAffectRestoredMessageTarget } from '../entrypoints/content/restored-message-targets';
+import {
+  getRestoredMessageMutationAction,
+  mutationMayAffectRestoredMessageTarget,
+} from '../entrypoints/content/restored-message-targets';
 
 describe('restored message target mutations', () => {
   it('detects newly mounted messages and content added inside an existing message', () => {
@@ -37,14 +40,65 @@ describe('restored message target mutations', () => {
     expect(mutationMayAffectRestoredMessageTarget(childListMutation(toolBlock, toolItem)))
       .toBe(false);
   });
+
+  it('does not schedule a full restore for ordinary streaming text after pending records finish', () => {
+    const message = document.createElement('article');
+    message.className = 'ds-message';
+    const text = document.createTextNode('Streaming assistant content');
+    message.appendChild(text);
+
+    expect(getRestoredMessageMutationAction([characterDataMutation(text)], {
+      hasPendingRecords: false,
+      restoredUiSelector: '.dpp-tool-block',
+    })).toEqual({
+      requeueMountedRecords: false,
+      schedulePendingRender: false,
+    });
+    expect(getRestoredMessageMutationAction([characterDataMutation(text)], {
+      hasPendingRecords: true,
+      restoredUiSelector: '.dpp-tool-block',
+    })).toEqual({
+      requeueMountedRecords: false,
+      schedulePendingRender: true,
+    });
+  });
+
+  it('requeues records when a message remounts or restored UI is removed', () => {
+    const message = document.createElement('article');
+    message.className = 'ds-message';
+    const toolBlock = document.createElement('div');
+    toolBlock.className = 'dpp-tool-block';
+
+    expect(getRestoredMessageMutationAction([childListMutation(document.body, message)], {
+      hasPendingRecords: false,
+      restoredUiSelector: '.dpp-tool-block',
+    })).toEqual({
+      requeueMountedRecords: true,
+      schedulePendingRender: true,
+    });
+    expect(getRestoredMessageMutationAction([childListMutation(message, [], [toolBlock])], {
+      hasPendingRecords: false,
+      restoredUiSelector: '.dpp-tool-block',
+    })).toEqual({
+      requeueMountedRecords: true,
+      schedulePendingRender: true,
+    });
+  });
 });
 
-function childListMutation(target: Node, ...addedNodes: Node[]): MutationRecord {
+function childListMutation(
+  target: Node,
+  addedNodesOrFirstNode: Node[] | Node,
+  removedNodes: Node[] = [],
+): MutationRecord {
+  const addedNodes = Array.isArray(addedNodesOrFirstNode)
+    ? addedNodesOrFirstNode
+    : [addedNodesOrFirstNode];
   return {
     type: 'childList',
     target,
     addedNodes: addedNodes as unknown as NodeList,
-    removedNodes: [] as unknown as NodeList,
+    removedNodes: removedNodes as unknown as NodeList,
   } as MutationRecord;
 }
 

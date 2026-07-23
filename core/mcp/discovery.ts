@@ -273,7 +273,7 @@ async function discoverServerTools(
     expiresAt: completedAt + (options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS),
     health,
   };
-  await saveMcpDiscoveryResult(entry);
+  await saveMcpDiscoveryResult(entry, server);
   return entry;
 }
 
@@ -304,7 +304,7 @@ async function persistMcpDiscoveryFailure(
       ?? completedAt + Math.min(options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, 30_000),
     health,
   };
-  await saveMcpDiscoveryResult(entry);
+  await saveMcpDiscoveryResult(entry, server);
   return entry;
 }
 

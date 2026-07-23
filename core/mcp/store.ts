@@ -23,6 +23,16 @@ import {
 const REDACTED_SECRET_VALUE = '********';
 const mcpStorageOperations = createSerialOperationQueue();
 
+export class McpDiscoveryConfigChangedError extends Error {
+  readonly code = 'mcp_discovery_config_changed';
+  readonly retryable = true;
+
+  constructor(serverId: McpServerId) {
+    super(`MCP server configuration changed during discovery: ${serverId}`);
+    this.name = 'McpDiscoveryConfigChangedError';
+  }
+}
+
 export async function getAllMcpServers(options?: { includeSecrets?: boolean }): Promise<McpServerConfig[]> {
   return mcpStorageOperations.run(async () => {
     const state = await readStateAlreadyOwned();
@@ -187,13 +197,22 @@ export async function saveMcpToolCache(entry: McpToolCacheEntry): Promise<void> 
  * and keeps concurrent allowlist or execution-policy changes on the latest
  * server record owned by the storage queue.
  */
-export async function saveMcpDiscoveryResult(entry: McpToolCacheEntry): Promise<void> {
+export async function saveMcpDiscoveryResult(
+  entry: McpToolCacheEntry,
+  expectedServer: McpServerConfig,
+): Promise<void> {
   await mcpStorageOperations.run(async () => {
     const state = await readStateAlreadyOwned();
-    let found = false;
+    const currentServer = state.servers.find((server) => server.id === entry.serverId);
+    if (!currentServer) {
+      throw new Error(`MCP server not found during discovery commit: ${entry.serverId}`);
+    }
+    if (mcpDiscoveryFingerprint(currentServer) !== mcpDiscoveryFingerprint(expectedServer)) {
+      throw new McpDiscoveryConfigChangedError(entry.serverId);
+    }
+
     const servers = state.servers.map((server) => {
       if (server.id !== entry.serverId) return server;
-      found = true;
       return applyMcpServerHealthPatch(server, {
         status: entry.health.status,
         lastConnectedAt: entry.health.status === 'ready'
@@ -202,10 +221,6 @@ export async function saveMcpDiscoveryResult(entry: McpToolCacheEntry): Promise<
         lastError: entry.health.error,
       });
     });
-
-    if (!found) {
-      throw new Error(`MCP server not found during discovery commit: ${entry.serverId}`);
-    }
 
     await writeStateAlreadyOwned({
       ...state,

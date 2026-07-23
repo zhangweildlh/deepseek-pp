@@ -184,6 +184,78 @@ describe('MCP execution policy', () => {
     });
   });
 
+  it('rejects a discovery result when connection configuration changes during provider I/O', async () => {
+    const oldUrl = 'http://127.0.0.1:48130/mcp';
+    const newUrl = 'http://127.0.0.1:48131/mcp';
+    const firstInitialize = deferred<Response>();
+    let firstInitializeId: string | null = null;
+    const requests: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { id?: string; method: string };
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      requests.push({ url, method: request.method });
+
+      if (url === oldUrl && request.method === 'initialize') {
+        firstInitializeId = request.id ?? null;
+        return firstInitialize.promise;
+      }
+      if (request.method === 'notifications/initialized') return new Response(null, { status: 202 });
+
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id ?? null,
+        result: request.method === 'tools/list'
+          ? {
+              tools: [{
+                name: url === newUrl ? 'new_tool' : 'old_tool',
+                description: 'Configuration-bound discovery tool.',
+                inputSchema: { type: 'object', properties: {} },
+              }],
+            }
+          : { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const server = await createMcpServer({
+      displayName: 'Mutable Discovery MCP',
+      enabled: true,
+      transport: { kind: 'streamable_http', url: oldUrl },
+    });
+    const pending = refreshMcpServerDiscovery(server.id);
+    await vi.waitFor(() => expect(requests).toContainEqual({ url: oldUrl, method: 'initialize' }));
+
+    await updateMcpServer(server.id, {
+      transport: { kind: 'streamable_http', url: newUrl },
+    });
+    firstInitialize.resolve(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: firstInitializeId,
+      result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'mcp_discovery_config_changed',
+      retryable: true,
+    });
+    await expect(getMcpToolCache(server.id)).resolves.toBeNull();
+    await expect(getMcpServerById(server.id)).resolves.toMatchObject({
+      transport: { kind: 'streamable_http', url: newUrl },
+      status: 'unknown',
+      lastConnectedAt: null,
+      lastError: null,
+    });
+
+    const refreshed = await refreshMcpServerDiscovery(server.id);
+    expect(refreshed.descriptors.map((descriptor) => descriptor.name)).toEqual(['new_tool']);
+    await expect(getMcpToolCache(server.id)).resolves.toMatchObject({
+      descriptors: [expect.objectContaining({ name: 'new_tool' })],
+      health: { status: 'ready' },
+    });
+  });
+
   it('keeps the last successful tool snapshot when a refresh fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new TypeError('provider offline');

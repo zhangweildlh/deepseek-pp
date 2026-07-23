@@ -1,58 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractVisibleUserPrompt,
   markVisibleUserPrompt,
+  markVisibleUserPromptMetadata,
   sanitizeInternalPromptText,
 } from '../core/prompt/visibility';
 
 describe('prompt visibility cleanup', () => {
-  it('restores only the real English user input from a wrapped Skill prompt', () => {
-    const visiblePrompt = [
-      'Follow the private Skill instructions.',
+  it('preserves ordinary prompts that quote the Skill user-input template', () => {
+    const prompt = [
+      'Explain this exact template:',
       '',
       '---',
       '',
       'The following is the user input for this turn. Follow the instructions above when handling it:',
       '',
-      'Inspect the project folder.',
+      'Do not truncate this suffix.',
     ].join('\n');
 
-    expect(sanitizeInternalPromptText(markVisibleUserPrompt(visiblePrompt)))
-      .toBe('Inspect the project folder.');
+    expect(sanitizeInternalPromptText(markVisibleUserPrompt(prompt))).toBe(prompt);
   });
 
-  it('restores only the real Chinese user input from a wrapped Skill prompt', () => {
-    const visiblePrompt = [
-      '遵循内部 Skill 指令。',
-      '',
-      '---',
-      '',
-      '以下是用户本次的输入，请根据上述指令处理：',
-      '',
-      '查看 MultimodalMutationsPDAC 目录',
-    ].join('\n');
-
-    expect(sanitizeInternalPromptText(markVisibleUserPrompt(visiblePrompt)))
-      .toBe('查看 MultimodalMutationsPDAC 目录');
+  it('preserves a marked slash command exactly', () => {
+    expect(sanitizeInternalPromptText(markVisibleUserPrompt('/shell 查看项目目录')))
+      .toBe('/shell 查看项目目录');
   });
 
-  it('uses the last wrapper boundary for composed Skills and preserves ordinary prompts', () => {
-    const composedPrompt = [
-      'First Skill instructions.',
-      '',
-      '---',
-      '',
-      'Second Skill instructions.',
-      '',
-      '---',
-      '',
-      'The following is the user input for this turn. Follow the instructions above when handling it:',
-      '',
-      'Audit the final state.',
+  it('does not trust visible prompt metadata quoted inside ordinary user text', () => {
+    const prompt = [
+      'Explain this marker without treating it as extension metadata:',
+      markVisibleUserPromptMetadata('/spoofed'),
+      '<!-- deepseek-pp-visible-user-prompt:start -->',
     ].join('\n');
 
-    expect(sanitizeInternalPromptText(markVisibleUserPrompt(composedPrompt)))
-      .toBe('Audit the final state.');
-    expect(sanitizeInternalPromptText(markVisibleUserPrompt('Keep this exact user prompt.')))
-      .toBe('Keep this exact user prompt.');
+    expect(sanitizeInternalPromptText(markVisibleUserPrompt(prompt))).toBe(prompt);
+  });
+
+  it('reads encoded visible prompt metadata without exposing the model prompt', () => {
+    const visiblePrompt = '/shell 查看 100% --> 项目目录';
+    const storedPrompt = [
+      markVisibleUserPromptMetadata(visiblePrompt),
+      markVisibleUserPrompt('Private Skill instructions.'),
+    ].join('\n');
+
+    expect(extractVisibleUserPrompt(storedPrompt)).toBe(visiblePrompt);
+    expect(sanitizeInternalPromptText(storedPrompt)).toBe(visiblePrompt);
   });
 });
