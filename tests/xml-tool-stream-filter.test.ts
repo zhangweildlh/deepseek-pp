@@ -56,6 +56,17 @@ describe('XmlToolStreamFilter', () => {
     expect(readVisibleText(output)).toBe('Before  after');
   });
 
+  it('keeps an unclosed oversized artifact body out of the visible stream at EOF', () => {
+    const output = runFilter([
+      sseText('Before <artifact_create>'),
+      sseText('{"filename":"demo.pptx","content":"' + 'A'.repeat(250_000)),
+    ]);
+
+    expect(output).not.toContain('artifact_create');
+    expect(output).not.toContain('AAAA');
+    expect(readVisibleText(output)).toBe('Before ');
+  });
+
   it('buffers partial SSE events before parsing full-text stream state', () => {
     const parsed: unknown[] = [];
     const decoder = createDeepSeekSseFrameDecoder();

@@ -11,13 +11,14 @@ import {
   createToolInvocationCatalog,
   getToolCloseTag,
   getToolOpenTag,
+  hasXmlToolMarker,
   type ToolInvocationCatalog,
 } from '../tool';
+import { findFirstXmlToolTag } from '../tool/xml-tags';
 import {
   extractToolCalls,
   LEGACY_TOOL_CALLS_CLOSE_TAG,
   LEGACY_TOOL_CALLS_OPEN_TAG,
-  stripToolCalls,
 } from './tool-parser';
 
 const RESTORE_FULL_PARSE_MAX_LENGTH = 120_000;
@@ -34,6 +35,7 @@ interface LightweightToolBlock {
   start: number;
   end: number;
   invocationNames: string[];
+  complete: boolean;
 }
 
 export interface HistoryCleanupOptions {
@@ -113,22 +115,14 @@ function stripMessageToolCalls(
       }
       msg.content = stripToolCallsForHistoryText(msg.content, toolDescriptors);
     }
-    if (msg.fragments && Array.isArray(msg.fragments)) {
-      msg.fragments.forEach((frag: any, fragIndex: number) => {
-        if (typeof frag.content === 'string' && hasToolCallMarker(frag.content, toolDescriptors)) {
-          if (shouldRestoreToolCalls) {
-            const record = collectToolCallRestoreRecord(
-              frag.content,
-              `${messageKey}:fragment:${fragIndex}`,
-              toolDescriptors,
-              metadata,
-            );
-            if (record) restoredRecords.push(record);
-          }
-          frag.content = stripToolCallsForHistoryText(frag.content, toolDescriptors);
-        }
-      });
-    }
+    stripFragmentToolCalls(
+      msg.fragments,
+      messageKey,
+      restoredRecords,
+      toolDescriptors,
+      metadata,
+      shouldRestoreToolCalls,
+    );
   });
 }
 
@@ -136,7 +130,42 @@ function hasToolCallMarker(text: string, toolDescriptors: readonly ToolDescripto
   if (!text.includes('<')) return false;
   if (text.includes('｜DSML｜')) return true;
   const catalog = createToolInvocationCatalog(toolDescriptors);
-  return hasXmlToolMarkerInText(text, catalog);
+  return hasXmlToolMarker(text, catalog);
+}
+
+function stripFragmentToolCalls(
+  fragments: unknown,
+  messageKey: string,
+  restoredRecords: ToolCallRestoreRecord[],
+  toolDescriptors: readonly ToolDescriptor[],
+  metadata: Record<string, unknown>,
+  shouldRestoreToolCalls: boolean,
+): void {
+  if (!Array.isArray(fragments)) return;
+
+  const textFragments = fragments
+    .map((fragment: any, index: number) => ({ fragment, index }))
+    .filter((entry): entry is { fragment: { content: string }; index: number } => (
+      entry.fragment && typeof entry.fragment.content === 'string'
+    ));
+  if (textFragments.length === 0) return;
+
+  const text = textFragments.map(({ fragment }) => fragment.content).join('');
+  if (!hasToolCallMarker(text, toolDescriptors)) return;
+
+  if (shouldRestoreToolCalls) {
+    const firstIndex = textFragments[0].index;
+    const lastIndex = textFragments[textFragments.length - 1].index;
+    const key = firstIndex === lastIndex
+      ? `${messageKey}:fragment:${firstIndex}`
+      : `${messageKey}:fragments:${firstIndex}-${lastIndex}`;
+    const record = collectToolCallRestoreRecord(text, key, toolDescriptors, metadata);
+    if (record) restoredRecords.push(record);
+  }
+
+  const catalog = createToolInvocationCatalog(toolDescriptors);
+  const blocks = findLightweightToolBlocks(text, catalog);
+  stripToolBlocksFromFragments(text, textFragments, blocks);
 }
 
 function hashString(value: string): string {
@@ -222,19 +251,17 @@ function collectToolCallRestoreRecord(
 ): ToolCallRestoreRecord | null {
   if (!hasToolCallMarker(text, toolDescriptors)) return null;
 
+  const catalog = createToolInvocationCatalog(toolDescriptors);
+  const blocks = findLightweightToolBlocks(text, catalog);
   let calls: ToolCall[];
-  let content: string;
   if (text.length > RESTORE_FULL_PARSE_MAX_LENGTH) {
-    const catalog = createToolInvocationCatalog(toolDescriptors);
-    const blocks = findLightweightToolBlocks(text, catalog);
     calls = createLightweightToolCalls(blocks, catalog);
-    content = stripToolBlocksFromText(text, blocks);
   } else {
     calls = extractToolCalls(text, { descriptors: toolDescriptors });
-    content = stripToolCalls(text, { descriptors: toolDescriptors });
   }
   if (calls.length === 0) return null;
 
+  const content = stripToolBlocksFromText(text, blocks);
   const restoreCalls = calls.map(sanitizeToolCallForRestoreRecord);
   const id = hashString([
     key,
@@ -257,6 +284,7 @@ function createLightweightToolCalls(
   const calls: ToolCall[] = [];
 
   for (const block of blocks) {
+    if (!block.complete) continue;
     for (const invocationName of block.invocationNames) {
       calls.push(createToolCallFromInvocation(
         invocationName,
@@ -274,10 +302,6 @@ function stripToolCallsForHistoryText(
   text: string,
   toolDescriptors: readonly ToolDescriptor[],
 ): string {
-  if (text.length <= RESTORE_FULL_PARSE_MAX_LENGTH) {
-    return stripToolCalls(text, { descriptors: toolDescriptors });
-  }
-
   const catalog = createToolInvocationCatalog(toolDescriptors);
   const blocks = findLightweightToolBlocks(text, catalog);
   return stripToolBlocksFromText(text, blocks);
@@ -298,6 +322,40 @@ function stripToolBlocksFromText(
   parts.push(text.slice(cursor));
 
   return parts.join('').trim();
+}
+
+function stripToolBlocksFromFragments(
+  text: string,
+  fragments: Array<{ fragment: { content: string }; index: number }>,
+  blocks: readonly LightweightToolBlock[],
+): void {
+  if (blocks.length === 0) return;
+
+  let fragmentStart = 0;
+  for (const { fragment } of fragments) {
+    const fragmentEnd = fragmentStart + fragment.content.length;
+    let cursor = fragmentStart;
+    let next = '';
+
+    for (const block of blocks) {
+      if (block.end <= fragmentStart) continue;
+      if (block.start >= fragmentEnd) break;
+
+      const visibleEnd = Math.min(block.start, fragmentEnd);
+      if (visibleEnd > cursor) next += text.slice(cursor, visibleEnd);
+      cursor = Math.max(cursor, Math.min(block.end, fragmentEnd));
+    }
+
+    if (cursor < fragmentEnd) next += text.slice(cursor, fragmentEnd);
+    fragment.content = next;
+    fragmentStart = fragmentEnd;
+  }
+
+  const firstVisible = fragments.find(({ fragment }) => fragment.content.length > 0)?.fragment;
+  const lastVisible = [...fragments].reverse()
+    .find(({ fragment }) => fragment.content.length > 0)?.fragment;
+  if (firstVisible) firstVisible.content = firstVisible.content.trimStart();
+  if (lastVisible) lastVisible.content = lastVisible.content.trimEnd();
 }
 
 function findLightweightToolBlocks(
@@ -324,58 +382,31 @@ function findXmlToolBlocks(
   catalog: ToolInvocationCatalog,
 ): LightweightToolBlock[] {
   const blocks: LightweightToolBlock[] = [];
+  const invocationNames = new Set(catalog.invocationNames);
   let searchFrom = 0;
 
   while (searchFrom < text.length) {
-    const openIndex = text.indexOf('<', searchFrom);
-    if (openIndex === -1) break;
-
-    const tagEnd = text.indexOf('>', openIndex + 1);
-    if (tagEnd === -1) break;
-    const invocationName = text.slice(openIndex + 1, tagEnd);
-    if (!catalog.descriptorByInvocationName.has(invocationName)) {
-      searchFrom = invocationName.includes('<') ? openIndex + 1 : tagEnd + 1;
-      continue;
-    }
-
-    const closeTag = getToolCloseTag(invocationName);
-    const closeIndex = text.indexOf(closeTag, tagEnd + 1);
-    if (closeIndex === -1) {
-      searchFrom = tagEnd + 1;
-      continue;
-    }
+    const openTag = findFirstXmlToolTag(text, invocationNames, {
+      closing: false,
+      fromIndex: searchFrom,
+    });
+    if (!openTag) break;
+    const closeTag = findFirstXmlToolTag(text, new Set([openTag.name]), {
+      closing: true,
+      fromIndex: openTag.endIndex,
+    });
 
     blocks.push({
-      start: openIndex,
-      end: closeIndex + closeTag.length,
-      invocationNames: [invocationName],
+      start: openTag.index,
+      end: closeTag?.endIndex ?? text.length,
+      invocationNames: [openTag.name],
+      complete: Boolean(closeTag),
     });
-    searchFrom = closeIndex + closeTag.length;
+    if (!closeTag) break;
+    searchFrom = closeTag.endIndex;
   }
 
   return blocks;
-}
-
-function hasXmlToolMarkerInText(
-  text: string,
-  catalog: ToolInvocationCatalog,
-): boolean {
-  let searchFrom = 0;
-
-  while (searchFrom < text.length) {
-    const openIndex = text.indexOf('<', searchFrom);
-    if (openIndex === -1) return false;
-
-    const tagEnd = text.indexOf('>', openIndex + 1);
-    if (tagEnd === -1) return false;
-    const nameStart = text[openIndex + 1] === '/' ? openIndex + 2 : openIndex + 1;
-    const invocationName = text.slice(nameStart, tagEnd);
-    if (catalog.descriptorByInvocationName.has(invocationName)) return true;
-
-    searchFrom = invocationName.includes('<') ? openIndex + 1 : tagEnd + 1;
-  }
-
-  return false;
 }
 
 function findLegacyToolBlocks(
@@ -393,14 +424,15 @@ function findLegacyToolBlocks(
       LEGACY_TOOL_CALLS_CLOSE_TAG,
       openIndex + LEGACY_TOOL_CALLS_OPEN_TAG.length,
     );
-    if (closeIndex === -1) break;
-
-    const end = closeIndex + LEGACY_TOOL_CALLS_CLOSE_TAG.length;
+    const complete = closeIndex !== -1;
+    const end = complete ? closeIndex + LEGACY_TOOL_CALLS_CLOSE_TAG.length : text.length;
     blocks.push({
       start: openIndex,
       end,
-      invocationNames: findLegacyInvocationNames(text, openIndex, end, catalog),
+      invocationNames: complete ? findLegacyInvocationNames(text, openIndex, end, catalog) : [],
+      complete,
     });
+    if (!complete) break;
     searchFrom = end;
   }
 

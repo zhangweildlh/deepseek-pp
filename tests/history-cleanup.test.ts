@@ -290,6 +290,109 @@ describe('history cleanup', () => {
     expect(records[0].calls[0].payload).toEqual({});
   });
 
+  it('strips an unclosed huge artifact payload from restored history without creating a tool card', () => {
+    const records: unknown[] = [];
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              message_id: 21,
+              message_role: 'assistant',
+              content: [
+                '正在生成演示文稿。',
+                '<artifact_create>',
+                '{"filename":"demo.pptx","content":"',
+                'A'.repeat(250_000),
+              ].join('\n'),
+            },
+          ],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: [
+        ...createDefaultToolDescriptors(),
+        ...createArtifactToolDescriptors(),
+      ],
+      onToolCallsRestored: (next) => records.push(...next),
+    });
+
+    expect(json.data.biz_data.chat_messages[0].content).toBe('正在生成演示文稿。');
+    expect(records).toEqual([]);
+  });
+
+  it('strips an unclosed whitespace-padded artifact across history fragments', () => {
+    const records: unknown[] = [];
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              message_id: 22,
+              message_role: 'assistant',
+              fragments: [
+                { content: '正在生成演示文稿。\n< artifact' },
+                { content: '_create >{"filename":"demo.pptx","content":"' },
+                { content: 'A'.repeat(250_000) },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: [
+        ...createDefaultToolDescriptors(),
+        ...createArtifactToolDescriptors(),
+      ],
+      onToolCallsRestored: (next) => records.push(...next),
+    });
+
+    const fragments = json.data.biz_data.chat_messages[0].fragments;
+    expect(fragments.map((fragment: { content: string }) => fragment.content).join('')).toBe('正在生成演示文稿。');
+    expect(records).toEqual([]);
+  });
+
+  it('restores and strips a completed artifact whose tags cross history fragments', () => {
+    const records: any[] = [];
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [
+            {
+              message_id: 23,
+              message_role: 'assistant',
+              fragments: [
+                { content: 'Before <artifact_' },
+                { content: 'create>{"filename":"demo.txt","content":"ok"}</artifact_' },
+                { content: 'create> after' },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: [
+        ...createDefaultToolDescriptors(),
+        ...createArtifactToolDescriptors(),
+      ],
+      onToolCallsRestored: (next) => records.push(...next),
+    });
+
+    const fragments = json.data.biz_data.chat_messages[0].fragments;
+    expect(fragments.map((fragment: { content: string }) => fragment.content).join('')).toBe('Before  after');
+    expect(records).toHaveLength(1);
+    expect(records[0].calls[0]).toMatchObject({
+      name: 'artifact_create',
+      payload: { filename: 'demo.txt', content: 'ok' },
+    });
+  });
+
   it('strips huge legacy DSML blocks without parsing their payload content', () => {
     const records: any[] = [];
     const json = {

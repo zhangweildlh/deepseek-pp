@@ -150,6 +150,42 @@ describe('createStreamingToolCallParser', () => {
     expect(terminal.failed[0].parseError?.code).toBe('tool_call_incomplete');
   });
 
+  it('fails and discards an oversized artifact body before it can grow without bound', () => {
+    const parser = createStreamingToolCallParser(descriptors);
+    const start = parser.append('<artifact_create>');
+
+    const oversized = parser.append('A'.repeat(1_100_000));
+
+    expect(oversized.completed).toEqual([]);
+    expect(oversized.failed).toHaveLength(1);
+    expect(oversized.failed[0]).toMatchObject({
+      id: start.started[0].id,
+      name: 'artifact_create',
+      payload: {},
+      parseError: {
+        code: 'tool_call_payload_too_large',
+        retryable: false,
+      },
+    });
+    expect(oversized.failed[0].raw.length).toBeLessThan(2200);
+
+    expect(parser.append('</artifact_create>')).toEqual({
+      started: [],
+      completed: [],
+      failed: [],
+      streamed: [],
+    });
+    const recovered = parser.append('<artifact_create>{"filename":"ok.txt","content":"ok"}</artifact_create>');
+    expect(recovered.completed).toHaveLength(1);
+    expect(recovered.completed[0].payload).toMatchObject({ filename: 'ok.txt', content: 'ok' });
+    expect(parser.flush()).toEqual({ started: [], completed: [], failed: [], streamed: [] });
+
+    const eofParser = createStreamingToolCallParser(descriptors);
+    eofParser.append('<artifact_create>');
+    eofParser.append('A'.repeat(1_100_000));
+    expect(eofParser.flush()).toEqual({ started: [], completed: [], failed: [], streamed: [] });
+  });
+
   it('never sends an incomplete terminal call to a tool provider', async () => {
     const descriptor = descriptors[0];
     const providerExecute = vi.fn();

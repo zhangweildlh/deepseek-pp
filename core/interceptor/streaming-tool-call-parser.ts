@@ -15,6 +15,7 @@ import {
 const STREAM_TOOL_RAW_MAX_LENGTH = 2048;
 const TRUNCATION_SUFFIX = '\n...[truncated]';
 const EXTERNALIZE_BODY_THRESHOLD_CHARS = 64_000;
+const STREAM_TOOL_BODY_MAX_CHARS = 1_048_576;
 
 export interface StreamingToolCallParserEvent {
   started: ToolCall[];
@@ -55,6 +56,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
     bodyLength: number;
     externalized: boolean;
     externalizable: boolean;
+    failed: boolean;
   } | null = null;
 
   constructor(private readonly catalog: ToolInvocationCatalog) {
@@ -76,7 +78,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
 
   flush(): StreamingToolCallParserEvent {
     const event = createEmptyParserEvent();
-    if (this.current) {
+    if (this.current && !this.current.failed) {
       event.failed.push(this.createIncompleteCall(this.current, this.pendingSuppressed));
     }
     this.state = 'NORMAL';
@@ -109,6 +111,7 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
       bodyLength: 0,
       externalized: false,
       externalizable: isExternalizableInvocation(found.name),
+      failed: false,
     };
     event.started.push(createToolCallFromInvocation(
       found.name,
@@ -139,7 +142,9 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
     }
 
     this.appendBody(text.slice(0, closeTag.index), event);
-    event.completed.push(this.createCompletedCall({ ...current, closeTag: closeTag.raw }));
+    if (!current.failed) {
+      event.completed.push(this.createCompletedCall({ ...current, closeTag: closeTag.raw }));
+    }
     this.state = 'NORMAL';
     this.pendingSuppressed = '';
     this.current = null;
@@ -148,7 +153,16 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
 
   private appendBody(value: string, event: StreamingToolCallParserEvent): void {
     if (!value || !this.current) return;
+    if (this.current.failed) return;
+
     this.current.bodyLength += value.length;
+    if (this.current.bodyLength > STREAM_TOOL_BODY_MAX_CHARS) {
+      this.current.failed = true;
+      this.current.bodyParts = [];
+      event.failed.push(this.createOversizedCall(this.current));
+      return;
+    }
+
     if (this.current.externalized) {
       event.streamed.push({ id: this.current.id, invocationName: this.current.invocationName, chunk: value });
       return;
@@ -236,6 +250,25 @@ class XmlStreamingToolCallParser implements StreamingToolCallParser {
     );
   }
 
+  private createOversizedCall(
+    current: NonNullable<XmlStreamingToolCallParser['current']>,
+  ): ToolCall {
+    return createToolCallFromInvocation(
+      current.invocationName,
+      {},
+      createOversizedRaw(current),
+      this.catalog,
+      {
+        id: current.id,
+        parseError: createToolParseError(
+          'tool_call_payload_too_large',
+          current.invocationName,
+          createOversizedToolCallMessage(current.invocationName),
+        ),
+      },
+    );
+  }
+
 }
 
 function createEmptyParserEvent(): StreamingToolCallParserEvent {
@@ -293,6 +326,28 @@ function createIncompleteRaw(
     `...[incomplete payload ${bodyLength} chars omitted]`,
     TRUNCATION_SUFFIX,
   ].join('\n');
+}
+
+function createOversizedRaw(
+  current: { openTag: string; bodyLength: number },
+): string {
+  return [
+    current.openTag,
+    `...[payload exceeded ${STREAM_TOOL_BODY_MAX_CHARS} chars; ${current.bodyLength} chars received]`,
+    TRUNCATION_SUFFIX,
+  ].join('\n');
+}
+
+function createOversizedToolCallMessage(invocationName: string): string {
+  const limit = `Tool call body exceeded the safe streaming limit of ${STREAM_TOOL_BODY_MAX_CHARS} characters.`;
+  if (invocationName === 'artifact_create' || invocationName === 'artifact_bundle_create') {
+    return [
+      limit,
+      'Do not embed binary or base64 file data in artifact calls.',
+      'Keep files produced by Shell or OfficeCLI at their local path and report that path to the user.',
+    ].join(' ');
+  }
+  return `${limit} Split the operation into smaller tool calls.`;
 }
 
 function isToolPayload(value: unknown): value is Record<string, unknown> {
