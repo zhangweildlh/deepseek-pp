@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1114-release-highlights">1.11.4 Highlights</a>
+  <a href="#1115-release-highlights">1.11.5 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.4 Release Highlights](#1114-release-highlights)
+- [1.11.5 Release Highlights](#1115-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,22 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.4 Release Highlights
+## 1.11.5 Release Highlights
+
+1.11.5 focuses on reliable everyday chat, MCP connections, and Shell Host responsiveness, reducing interruptions caused by request-shape changes, overlapping refreshes, or long-running native tools.
+
+| Area | Main changes |
+|------|--------------|
+| Everyday chat reliability | When a DeepSeek request cannot be safely enhanced, the extension now sends the original request unchanged instead of interrupting the conversation. |
+| MCP permission confirmation | Connecting an MCP service that needs site access now starts the browser permission prompt directly from the user's side-panel action. |
+| MCP tool refresh | Tests and refreshes for the same service run in order; a failed refresh keeps the last successfully discovered tools while clearly showing the connection error. |
+| Shell Host responsiveness | Tool lists and other control requests remain responsive during long native tool calls, Windows command-environment setup, or folder selection. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.4 - 0.2.0)</summary>
+
+### 1.11.4 Release Highlights
 
 1.11.4 focuses on tool authorization, post-tool continuation, and Windows Firefox native-host reliability, reducing interruptions caused by page transitions, permission confirmation, or multi-browser setup.
 
@@ -310,9 +325,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | MCP tool recovery | Keeps discovered tools after a service-health update so a test or refresh cannot unexpectedly empty the tool list. |
 | Windows Firefox Shell MCP | Keeps a separate native-host manifest for each Windows browser so Firefox no longer overwrites a Chrome, Edge, or Chromium setup. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.3 - 0.2.0)</summary>
 
 ### 1.11.3 Release Highlights
 
