@@ -14,6 +14,7 @@ export const REQUIRED_HOST_RUNTIME_FILES = [
   'picker-provider.mjs',
   'process-provider.mjs',
   'router.mjs',
+  'runtime-dispatcher.mjs',
   'session-provider.mjs',
   'shell-mcp-host.mjs',
   'skill-provider.mjs',

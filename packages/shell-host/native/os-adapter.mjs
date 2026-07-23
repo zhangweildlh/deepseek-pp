@@ -1,8 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, platform, release as osRelease } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { DEFAULT_SHELL, WINDOWS_POWERSHELL_UTF8_PREAMBLE } from './contracts.mjs';
+
+const execFileAsync = promisify(execFile);
 
 export const PATH_SEPARATOR = platform() === 'win32' ? ';' : ':';
 export const localAppData = process.env.LOCALAPPDATA || resolve(homedir(), 'AppData', 'Local');
@@ -43,15 +46,22 @@ export function initializeHostEnvironment(packageRoot, logLine) {
       ];
   const managedPathDirs = new Set([nodeBinDir, ...localBinDirs, ...userBinDirs]);
   const existingPathDirs = splitPath(currentPath).filter(directory => !managedPathDirs.has(directory));
-  const hostPath = dedupePathDirs([
+  const buildHostPath = (windowsPathDirs) => dedupePathDirs([
     nodeBinDir,
     ...userBinDirs,
-    ...readWindowsUserMachinePathDirs(logLine),
+    ...windowsPathDirs,
     ...existingPathDirs,
     ...localBinDirs,
   ]).join(PATH_SEPARATOR);
-  setEnvironmentPath(process.env, hostPath);
-  return hostPath;
+  const initialPath = buildHostPath([]);
+  setEnvironmentPath(process.env, initialPath);
+  if (platform() !== 'win32') return initialPath;
+
+  return readWindowsUserMachinePathDirs(logLine).then((windowsPathDirs) => {
+    const hostPath = buildHostPath(windowsPathDirs);
+    setEnvironmentPath(process.env, hostPath);
+    return hostPath;
+  });
 }
 
 export function createChildEnv(extraEnv) {
@@ -160,7 +170,7 @@ function dedupePathDirs(dirs) {
   return result;
 }
 
-function readWindowsUserMachinePathDirs(logLine) {
+async function readWindowsUserMachinePathDirs(logLine) {
   if (platform() !== 'win32') return [];
   const command = [
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
@@ -168,7 +178,7 @@ function readWindowsUserMachinePathDirs(logLine) {
     "$paths | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_) }",
   ].join('; ');
   try {
-    const output = execFileSync('powershell.exe', [
+    const { stdout } = await execFileAsync('powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command,
     ], {
       encoding: 'utf8',
@@ -176,7 +186,7 @@ function readWindowsUserMachinePathDirs(logLine) {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
-    return splitPath(output.replace(/\r?\n/g, PATH_SEPARATOR));
+    return splitPath(stdout.replace(/\r?\n/g, PATH_SEPARATOR));
   } catch (error) {
     logLine(`Could not read Windows User/Machine PATH: ${error instanceof Error ? error.message : String(error)}`);
     return [];

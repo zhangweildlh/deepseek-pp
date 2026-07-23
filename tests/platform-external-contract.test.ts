@@ -84,7 +84,28 @@ describe('external platform capability contract', () => {
         code: 'mcp_origin_permission_denied',
         retryable: false,
       });
-    expect(request).toHaveBeenCalledWith({ origins: ['https://mcp.example.test/*'] });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when MCP host permission cannot be checked', async () => {
+    vi.stubGlobal('chrome', { permissions: {} });
+    await expect(ensureMcpServerOriginPermission(mcpServer())).rejects.toMatchObject({
+      code: 'mcp_origin_permission_check_unavailable',
+      retryable: false,
+    });
+
+    vi.stubGlobal('chrome', {
+      permissions: {
+        contains: vi.fn(async () => {
+          throw new Error('Extension context invalidated');
+        }),
+      },
+    });
+    await expect(ensureMcpServerOriginPermission(mcpServer())).rejects.toMatchObject({
+      code: 'mcp_origin_permission_check_failed',
+      retryable: true,
+      message: expect.stringContaining('Extension context invalidated'),
+    });
   });
 
   it('matches manifest-backed capabilities while unloaded and unknown environments fail closed', () => {

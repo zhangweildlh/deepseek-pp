@@ -32,7 +32,7 @@ import {
 } from '../core/interceptor/tool-parser';
 import {
   augmentDecodedRequestBody,
-  decodeDeepSeekRequestBody,
+  decodeAugmentableDeepSeekRequestBody,
   type DeepSeekRequestBody,
 } from '../core/interceptor/request-augmentation';
 import { containsInternalPromptMarker, sanitizeInternalPromptText } from '../core/prompt';
@@ -1097,10 +1097,19 @@ async function handleAugmentRequestBody(data: {
     if (typeof data.body !== 'string') {
       throw new Error('Request body must be a string.');
     }
+    const decodedBody = decodeAugmentableDeepSeekRequestBody(data.body);
+    if (!decodedBody) {
+      postToMainWorld({
+        type: 'AUGMENT_REQUEST_BODY_RESULT',
+        id,
+        ok: true,
+        result: null,
+      });
+      return;
+    }
     if (!mainRequestId) {
       throw new Error('Request authorization identity is missing.');
     }
-    const decodedBody = decodeDeepSeekRequestBody(data.body);
     if (
       toolAuthorizationRequestAliases.has(mainRequestId) ||
       !pendingToolAuthorizationCorrelations.begin(mainRequestId)

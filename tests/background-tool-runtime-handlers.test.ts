@@ -238,10 +238,10 @@ describe('MCP runtime handlers', () => {
       type: 'REQUEST_MCP_SERVER_PERMISSION',
       payload: { serverId: 'server-1' },
     })).resolves.toEqual({ ok: true, origin: null });
-    expect(dependencies.requestMcpServerOriginPermission).not.toHaveBeenCalled();
+    expect(dependencies.hasMcpServerOriginPermission).not.toHaveBeenCalled();
 
     vi.mocked(dependencies.getMcpServerById).mockResolvedValue(createMcpServer());
-    vi.mocked(dependencies.requestMcpServerOriginPermission)
+    vi.mocked(dependencies.hasMcpServerOriginPermission)
       .mockResolvedValueOnce(false)
       .mockRejectedValueOnce(new Error('permissions API unavailable'));
     await expect(dispatch(handlers, {
@@ -796,7 +796,7 @@ function createMcpDependencies(): McpRuntimeHandlerDependencies {
     getMcpToolCache: vi.fn(async () => createMcpCache()),
     refreshMcpServerDiscovery: vi.fn(async () => createMcpCache()),
     getMcpOriginPattern: vi.fn(() => 'https://example.test/*'),
-    requestMcpServerOriginPermission: vi.fn(async () => true),
+    hasMcpServerOriginPermission: vi.fn(async () => true),
     broadcastMcpServersUpdate: vi.fn(async () => undefined),
     broadcastToolDescriptorsUpdate: vi.fn(async () => undefined),
   };

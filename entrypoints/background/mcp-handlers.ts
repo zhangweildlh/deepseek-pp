@@ -34,7 +34,7 @@ export interface McpRuntimeHandlerDependencies {
   getMcpToolCache(serverId: string): Promise<McpToolCacheEntry | null>;
   refreshMcpServerDiscovery(serverId: string): Promise<McpToolCacheEntry>;
   getMcpOriginPattern(server: McpServerConfig): string;
-  requestMcpServerOriginPermission(server: McpServerConfig): Promise<boolean>;
+  hasMcpServerOriginPermission(server: McpServerConfig): Promise<boolean>;
   broadcastMcpServersUpdate(excludeTabId?: number): Promise<void>;
   broadcastToolDescriptorsUpdate(excludeTabId?: number): Promise<void>;
 }
@@ -90,6 +90,9 @@ export function createMcpRuntimeHandlers(
       await notifyMcpAndTools(context.tabId);
       return cache;
     }),
+    // Keep the released command for compatibility, but never request a new
+    // host permission from a runtime message: the Side Panel owns that user
+    // gesture. Background callers may only observe the current grant.
     defineToolPayloadRuntimeCommandHandler('REQUEST_MCP_SERVER_PERMISSION', async (payload) => {
       const server = await dependencies.getMcpServerById(payload.serverId);
       if (!server) return { ok: false as const, error: 'mcp_server_not_found' };
@@ -98,7 +101,7 @@ export function createMcpRuntimeHandlers(
       }
       try {
         const origin = dependencies.getMcpOriginPattern(server);
-        const ok = await dependencies.requestMcpServerOriginPermission(server);
+        const ok = await dependencies.hasMcpServerOriginPermission(server);
         return { ok, origin };
       } catch (error) {
         return permissionFailure(error);

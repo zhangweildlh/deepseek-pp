@@ -147,7 +147,7 @@ import {
   updateMcpServer,
 } from '../core/mcp/store';
 import { refreshMcpServerDiscovery } from '../core/mcp/discovery';
-import { getMcpOriginPattern, requestMcpServerOriginPermission } from '../core/mcp/transports';
+import { getMcpOriginPattern, hasMcpServerOriginPermission } from '../core/mcp/transports';
 import {
   buildShellAllowlistUpgrade,
   createShellMcpPresetInput,
@@ -500,7 +500,7 @@ const runtimeCommandRegistry = createRuntimeCommandRegistry({
         getMcpToolCache,
         refreshMcpServerDiscovery,
         getMcpOriginPattern,
-        requestMcpServerOriginPermission,
+        hasMcpServerOriginPermission,
         broadcastMcpServersUpdate,
         broadcastToolDescriptorsUpdate,
       },

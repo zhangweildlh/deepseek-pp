@@ -5,10 +5,10 @@ export {
   fetchWithTimeout,
   getMcpEndpointUrl,
   getMcpOriginPattern,
+  hasMcpServerOriginPermission,
   normalizeJsonRpcResponse,
   readJsonRpcResponse,
   readSseJsonRpcResponse,
-  requestMcpServerOriginPermission,
 } from './common';
 
 export type {

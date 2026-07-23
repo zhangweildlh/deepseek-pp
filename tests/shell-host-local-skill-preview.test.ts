@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const hostPath = resolve(testDir, '../packages/shell-host/native/shell-mcp-host.mjs');
 const pickerProviderPath = resolve(testDir, '../packages/shell-host/native/picker-provider.mjs');
+const osAdapterPath = resolve(testDir, '../packages/shell-host/native/os-adapter.mjs');
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -55,10 +56,25 @@ describe('shell native host local_folder_pick', () => {
   it('keeps Windows folder picker arguments out of the PowerShell command text', () => {
     const source = readFileSync(pickerProviderPath, 'utf8');
 
+    expect(source).toContain("import { execFile } from 'node:child_process';");
+    expect(source).not.toContain('execFileSync');
     expect(source).toContain("'-EncodedCommand', encodePowerShellCommand(script)");
     expect(source).toContain('DPP_FOLDER_PICK_TITLE');
     expect(source).toContain('DPP_FOLDER_PICK_DEFAULT_PATH');
     expect(source).not.toContain("'-Command', script, title");
+  });
+});
+
+describe('shell native host startup', () => {
+  it('does not block the host event loop on Windows PATH discovery', () => {
+    const hostSource = readFileSync(hostPath, 'utf8');
+    const source = readFileSync(osAdapterPath, 'utf8');
+
+    expect(source).toContain("import { execFile } from 'node:child_process';");
+    expect(source).not.toContain('execFileSync');
+    expect(hostSource).toContain('const hostEnvironmentReady = Promise.resolve(');
+    expect(hostSource).toContain('createNativeEnvelopeDispatcher({');
+    expect(hostSource).toContain('hostEnvironmentReady,');
   });
 });
 

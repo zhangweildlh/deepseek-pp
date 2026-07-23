@@ -9,14 +9,15 @@ import { initializeHostEnvironment } from './os-adapter.mjs';
 import { readShellHostPackageMetadata } from './package-metadata.mjs';
 import { createPickerToolHandlers } from './picker-provider.mjs';
 import { createProcessToolHandlers } from './process-provider.mjs';
-import { createNativeRouter, jsonRpcError } from './router.mjs';
+import { createNativeRouter } from './router.mjs';
+import { createNativeEnvelopeDispatcher } from './runtime-dispatcher.mjs';
 import { createSessionProvider } from './session-provider.mjs';
 import { createSkillToolHandlers } from './skill-provider.mjs';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageMetadata = readShellHostPackageMetadata();
 const logger = createHostLogger();
-initializeHostEnvironment(packageRoot, logger.logLine);
+const hostEnvironmentReady = Promise.resolve(initializeHostEnvironment(packageRoot, logger.logLine));
 
 const sessionProvider = createSessionProvider({ logLine: logger.logLine });
 const router = createNativeRouter({
@@ -32,20 +33,20 @@ const router = createNativeRouter({
   serverVersion: packageMetadata.version,
 });
 const channel = createNativeMessageChannel({ logLine: logger.logLine });
+const dispatcher = createNativeEnvelopeDispatcher({
+  router,
+  channel,
+  logger,
+  hostEnvironmentReady,
+});
 
 async function main() {
   while (true) {
     const envelope = await channel.readMessage();
     if (envelope === NATIVE_EOF) break;
-    try {
-      const response = await router.handleEnvelope(envelope);
-      if (response) await channel.writeMessage(response);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.logLine(`Error: ${message}`);
-      await channel.writeMessage(jsonRpcError(null, -32603, message || 'Internal error'));
-    }
+    dispatcher.scheduleEnvelope(envelope);
   }
+  await dispatcher.settle();
   sessionProvider.shutdown();
 }
 

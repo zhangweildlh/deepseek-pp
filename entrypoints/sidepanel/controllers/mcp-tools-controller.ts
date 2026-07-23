@@ -5,6 +5,7 @@ import {
 } from '../../../core/multimodal';
 import { decodeMcpCapabilitySettings } from '../../../core/mcp/capability-settings';
 import { decodeMcpStorageState, MCP_STORAGE_VERSION } from '../../../core/mcp/storage-codec';
+import { getMcpOriginPattern } from '../../../core/mcp/transports';
 import {
   getSupportedMcpTransportKinds,
   isShellNativeHostSupported,
@@ -65,7 +66,7 @@ export interface McpToolsController {
     mode: McpCapabilityExposureMode;
     pinnedDescriptorIds?: readonly string[];
   }): Promise<McpCapabilitySettings>;
-  requestServerPermission(serverId: string): Promise<McpPermissionResult>;
+  requestServerPermission(server: McpServerConfig): Promise<McpPermissionResult>;
   connectServer(server: McpServerConfig, action: McpConnectionAction): Promise<McpToolCacheEntry>;
   getWebToolSettings(): Promise<WebToolSettings>;
   setWebToolEnabled(name: WebSearchToolName, enabled: boolean): Promise<void>;
@@ -104,6 +105,25 @@ export function createMcpToolsController(
     { type: 'GET_MCP_TOOL_CACHE', payload: { serverId: server.id } },
     { decode: (value) => decodeMcpToolCache(value, server) },
   );
+
+  const requestServerPermission = async (
+    server: McpServerConfig,
+  ): Promise<McpPermissionResult> => {
+    if (!mcpServerNeedsOriginPermission(server)) return { ok: true, origin: null };
+    const origin = getMcpOriginPattern(server);
+    try {
+      return {
+        ok: await hostPermissions.request([origin]),
+        origin,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        origin,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
 
   const controller: McpToolsController = {
     async loadMcpSnapshot() {
@@ -162,16 +182,10 @@ export function createMcpToolsController(
       },
       { decode: decodeMcpCapabilitySettings },
     ),
-    requestServerPermission: (serverId) => runtimeClient.request(
-      { type: 'REQUEST_MCP_SERVER_PERMISSION', payload: { serverId } },
-      { acceptFailure: true, decode: decodeMcpPermissionResult },
-    ),
+    requestServerPermission,
     async connectServer(server, action) {
       if (mcpServerNeedsOriginPermission(server)) {
-        const permission = await runtimeClient.request(
-          { type: 'REQUEST_MCP_SERVER_PERMISSION', payload: { serverId: server.id } },
-          { acceptFailure: true, decode: decodeMcpPermissionResult },
-        );
+        const permission = await requestServerPermission(server);
         if (!permission.ok) {
           throw new McpPermissionError(permission.origin, permission.error);
         }
@@ -380,24 +394,6 @@ function decodeMcpConnectionResponse(
     throw new Error('TEST_MCP_SERVER_CONNECTION response.ok must be a boolean.');
   }
   return decodeRequiredMcpToolCache(record.cache, server);
-}
-
-function decodeMcpPermissionResult(value: unknown): McpPermissionResult {
-  const record = requireRecord(value, 'REQUEST_MCP_SERVER_PERMISSION response');
-  if (typeof record.ok !== 'boolean') {
-    throw new Error('REQUEST_MCP_SERVER_PERMISSION response.ok must be a boolean.');
-  }
-  if (record.origin !== null && typeof record.origin !== 'string' && record.origin !== undefined) {
-    throw new Error('REQUEST_MCP_SERVER_PERMISSION response.origin is invalid.');
-  }
-  if (record.error !== undefined && typeof record.error !== 'string') {
-    throw new Error('REQUEST_MCP_SERVER_PERMISSION response.error is invalid.');
-  }
-  return {
-    ok: record.ok,
-    origin: typeof record.origin === 'string' ? record.origin : null,
-    ...(typeof record.error === 'string' ? { error: record.error } : {}),
-  };
 }
 
 function decodePlatformEnvironment(value: unknown): PlatformEnvironment {

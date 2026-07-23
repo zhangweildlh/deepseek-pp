@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-ignore - Shell Host runtime modules are executable .mjs files.
 import { copyHostRuntime } from '../packages/shell-host/lib/installer.mjs';
 // @ts-ignore - Shell Host runtime modules are executable .mjs files.
@@ -12,6 +12,8 @@ import { REQUIRED_HOST_RUNTIME_FILES, getMissingHostRuntimeFiles } from '../pack
 import { createNativeMessageChannel, NATIVE_EOF } from '../packages/shell-host/native/framing.mjs';
 // @ts-ignore - Shell Host runtime modules are executable .mjs files.
 import { createToolRegistry } from '../packages/shell-host/native/router.mjs';
+// @ts-ignore - Shell Host runtime modules are executable .mjs files.
+import { createNativeEnvelopeDispatcher } from '../packages/shell-host/native/runtime-dispatcher.mjs';
 
 const tempRoots: string[] = [];
 const shellPackage = readJson(resolve('packages/shell-host/package.json'));
@@ -168,7 +170,89 @@ describe('Shell Host modular runtime ownership', () => {
       },
     });
   });
+
+  it('serves control requests while a long tool call remains in the tool FIFO', async () => {
+    const command = process.platform === 'win32' ? 'Start-Sleep -Milliseconds 1200' : 'sleep 1.2';
+    const responses = await callHostResponses(resolve('packages/shell-host/native/shell-mcp-host.mjs'), [
+      {
+        protocol: 'deepseek-pp-mcp-native',
+        version: 1,
+        server: { id: 'concurrent-runtime' },
+        message: {
+          jsonrpc: '2.0',
+          id: 'slow',
+          method: 'tools/call',
+          params: { name: 'shell_exec', arguments: { command, timeout_ms: 3_000 } },
+        },
+      },
+      {
+        protocol: 'deepseek-pp-mcp-native',
+        version: 1,
+        server: { id: 'concurrent-runtime' },
+        message: { jsonrpc: '2.0', id: 'tools', method: 'tools/list' },
+      },
+    ]);
+
+    expect(responses.map((response) => response.id)).toEqual(['tools', 'slow']);
+  });
+
+  it('serves control requests while tool calls wait for host environment readiness', async () => {
+    const environmentReady = deferred<void>();
+    const handled: string[] = [];
+    const responses: Array<{ id: string }> = [];
+    const dispatcher = createNativeEnvelopeDispatcher({
+      hostEnvironmentReady: environmentReady.promise,
+      logger: { logLine: vi.fn() },
+      router: {
+        async handleEnvelope(envelope: { message: { id: string } }) {
+          handled.push(envelope.message.id);
+          return { id: envelope.message.id };
+        },
+      },
+      channel: {
+        async writeMessage(response: { id: string }) {
+          responses.push(response);
+        },
+      },
+    });
+
+    dispatcher.scheduleEnvelope(createHostEnvelope('tool-1', 'tools/call'));
+    dispatcher.scheduleEnvelope(createHostEnvelope('tool-2', 'tools/call'));
+    dispatcher.scheduleEnvelope(createHostEnvelope('control', 'tools/list'));
+
+    await vi.waitFor(() => expect(responses).toEqual([{ id: 'control' }]));
+    expect(handled).toEqual(['control']);
+
+    environmentReady.resolve();
+    await dispatcher.settle();
+
+    expect(handled).toEqual(['control', 'tool-1', 'tool-2']);
+    expect(responses).toEqual([
+      { id: 'control' },
+      { id: 'tool-1' },
+      { id: 'tool-2' },
+    ]);
+  });
 });
+
+function createHostEnvelope(id: string, method: string) {
+  return {
+    protocol: 'deepseek-pp-mcp-native',
+    version: 1,
+    server: { id: 'readiness-runtime' },
+    message: { jsonrpc: '2.0', id, method },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function createNativeFrame(message: unknown): Buffer {
   const body = Buffer.from(JSON.stringify(message), 'utf8');
@@ -208,6 +292,39 @@ function callHost(hostPath: string, envelope: unknown): Promise<any> {
       });
     });
     child.stdin.end(createNativeFrame(envelope));
+  });
+}
+
+function callHostResponses(hostPath: string, envelopes: unknown[]): Promise<any[]> {
+  const child = spawn(process.execPath, [hostPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+  return new Promise((resolveResponses, reject) => {
+    let stdout = Buffer.alloc(0);
+    const responses: any[] = [];
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Timed out waiting for concurrent Shell Host responses.'));
+    }, 5_000);
+    const finish = (callback: () => void) => {
+      clearTimeout(timer);
+      child.kill();
+      callback();
+    };
+    child.on('error', (error) => finish(() => reject(error)));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout = Buffer.concat([stdout, chunk]);
+      while (stdout.length >= 4) {
+        const length = stdout.readUInt32LE(0);
+        if (stdout.length < length + 4) return;
+        const body = stdout.subarray(4, length + 4).toString('utf8');
+        stdout = stdout.subarray(length + 4);
+        responses.push(JSON.parse(body));
+        if (responses.length === envelopes.length) {
+          finish(() => resolveResponses(responses));
+          return;
+        }
+      }
+    });
+    child.stdin.end(Buffer.concat(envelopes.map(createNativeFrame)));
   });
 }
 

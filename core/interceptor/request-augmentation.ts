@@ -43,13 +43,19 @@ export function augmentRequestBody(
   bodyStr: string,
   state: RequestAugmentationState,
 ): RequestBodyAugmentationResult | null {
-  let body: DeepSeekRequestBody;
+  const body = decodeAugmentableDeepSeekRequestBody(bodyStr);
+  if (!body) return null;
+  return augmentDecodedRequestBody(body, state);
+}
+
+export function decodeAugmentableDeepSeekRequestBody(
+  bodyStr: string,
+): DeepSeekRequestBody | null {
   try {
-    body = decodeDeepSeekRequestBody(bodyStr);
+    return decodeDeepSeekRequestBody(bodyStr);
   } catch {
     return null;
   }
-  return augmentDecodedRequestBody(body, state);
 }
 
 export function decodeDeepSeekRequestBody(bodyStr: string): DeepSeekRequestBody {

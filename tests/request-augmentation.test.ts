@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_TOOL_DESCRIPTORS } from '../core/tool';
 import {
   augmentRequestBody,
+  decodeAugmentableDeepSeekRequestBody,
   decodeDeepSeekRequestBody,
 } from '../core/interceptor/request-augmentation';
 import { buildPromptAugmentation } from '../core/prompt';
@@ -22,6 +23,16 @@ describe('augmentRequestBody', () => {
     expect(() => decodeDeepSeekRequestBody('[]')).toThrow('plain object');
     expect(() => decodeDeepSeekRequestBody(JSON.stringify({ prompt: 1 }))).toThrow('non-empty string');
     expect(() => decodeDeepSeekRequestBody(JSON.stringify({ prompt: '' }))).toThrow('non-empty string');
+  });
+
+  it('treats request shapes that cannot be augmented as explicit passthroughs', () => {
+    expect(decodeAugmentableDeepSeekRequestBody(JSON.stringify({
+      prompt: 'hello',
+      future_sibling: true,
+    }))).toEqual({ prompt: 'hello', future_sibling: true });
+    expect(decodeAugmentableDeepSeekRequestBody('{bad json}')).toBeNull();
+    expect(decodeAugmentableDeepSeekRequestBody(JSON.stringify({ prompt: '' }))).toBeNull();
+    expect(decodeAugmentableDeepSeekRequestBody(JSON.stringify({ prompt: 1 }))).toBeNull();
   });
 
   it('does not hide augmentation failures after the request body has decoded', () => {
