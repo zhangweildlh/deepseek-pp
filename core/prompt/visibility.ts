@@ -1,3 +1,5 @@
+import { SUPPORTED_LOCALES, translate } from '../i18n';
+
 export const VISIBLE_USER_PROMPT_START = '<!-- deepseek-pp-visible-user-prompt:start -->';
 export const VISIBLE_USER_PROMPT_END = '<!-- deepseek-pp-visible-user-prompt:end -->';
 
@@ -13,6 +15,13 @@ const TOOL_REMINDER_FRAGMENT_PREFIXES = [
   'Do not use <invoke name="...">',
   'Do not put executable tool XML',
 ];
+
+const SKILL_USER_INPUT_BOUNDARIES = SUPPORTED_LOCALES.map((locale) => (
+  translate(locale, 'prompt.skillUserInputWrapper', {
+    instructions: '',
+    userInput: '',
+  })
+));
 
 export function markVisibleUserPrompt(prompt: string): string {
   return `${VISIBLE_USER_PROMPT_START}\n${prompt}\n${VISIBLE_USER_PROMPT_END}`;
@@ -34,7 +43,9 @@ export function sanitizeInternalPromptText(
   fallbackVisiblePrompt?: string,
 ): string {
   const visiblePrompt = extractVisibleUserPrompt(text);
-  if (visiblePrompt !== null) return visiblePrompt;
+  if (visiblePrompt !== null) {
+    return extractSkillUserInput(visiblePrompt) ?? visiblePrompt;
+  }
 
   if (isToolReminderOnly(text)) return '';
 
@@ -43,6 +54,21 @@ export function sanitizeInternalPromptText(
   }
 
   return text;
+}
+
+function extractSkillUserInput(visiblePrompt: string): string | null {
+  let latestBoundaryIndex = -1;
+  let latestBoundary = '';
+
+  for (const boundary of SKILL_USER_INPUT_BOUNDARIES) {
+    const boundaryIndex = visiblePrompt.lastIndexOf(boundary);
+    if (boundaryIndex <= latestBoundaryIndex) continue;
+    latestBoundaryIndex = boundaryIndex;
+    latestBoundary = boundary;
+  }
+
+  if (latestBoundaryIndex === -1) return null;
+  return visiblePrompt.slice(latestBoundaryIndex + latestBoundary.length);
 }
 
 export function containsInternalPromptMarker(text: string): boolean {

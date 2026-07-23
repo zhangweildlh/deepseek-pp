@@ -7,7 +7,10 @@ const PENDING_ACTION_AFTER_MAX_CHARS = 80;
 const TASK_COMPLETE_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/;
 const TASK_COMPLETE_BLOCK_RE = /<task_complete>\s*([\s\S]*?)\s*<\/task_complete>/g;
 
-export const INLINE_AGENT_CONTINUATION_PLACEHOLDER = '[DeepSeek++ internal inline-agent continuation hidden]';
+// Keep the persisted continuation turn non-empty so DeepSeek retains its
+// parent/child message chain, while making the internal marker invisible even
+// if DeepSeek temporarily exposes the turn in an editor.
+export const INLINE_AGENT_CONTINUATION_PLACEHOLDER = '\u2063\u2064\u2063';
 
 export function extractTaskCompleteSignal(text: string): { summary: string; artifacts: string[] } | null {
   const match = TASK_COMPLETE_RE.exec(text);

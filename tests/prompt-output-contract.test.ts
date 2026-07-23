@@ -226,8 +226,8 @@ describe('inline-agent output compatibility contract', () => {
       'plain summary',
       'No control block.',
     ]);
-    expect(INLINE_AGENT_CONTINUATION_PLACEHOLDER)
-      .toBe('[DeepSeek++ internal inline-agent continuation hidden]');
+    expect(INLINE_AGENT_CONTINUATION_PLACEHOLDER).toBe('\u2063\u2064\u2063');
+    expect(INLINE_AGENT_CONTINUATION_PLACEHOLDER).not.toMatch(/[\p{L}\p{N}]/u);
   });
 });
 

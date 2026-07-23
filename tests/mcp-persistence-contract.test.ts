@@ -5,6 +5,7 @@ import {
   createMcpServer,
   getAllMcpServers,
   getMcpServerById,
+  getMcpToolCache,
   updateMcpServer,
   updateMcpServerHealth,
 } from '../core/mcp/store';
@@ -173,6 +174,19 @@ describe('MCP persisted-config contract', () => {
     });
 
     expect((await getMcpServerById(MCP_SERVER_IDS.shell))?.status).toBe('disabled');
+  });
+
+  it('preserves the discovery cache when a tool allowlist changes', async () => {
+    storage[MCP_STORAGE_KEY] = structuredClone(MCP_STORAGE_V2);
+
+    await updateMcpServer(MCP_SERVER_IDS.shell, {
+      allowlist: {
+        mode: 'deny',
+        toolNames: ['python_exec'],
+      },
+    });
+
+    expect(await getMcpToolCache(MCP_SERVER_IDS.shell)).toEqual(MCP_CACHE_ENTRY);
   });
 
   it('accepts current v2 cache collisions so the user can clear or refresh them', () => {

@@ -6,8 +6,7 @@ import {
   getAllMcpToolCaches,
   getMcpServerById,
   getMcpToolCache,
-  saveMcpToolCache,
-  updateMcpServerHealth,
+  saveMcpDiscoveryResult,
 } from './store';
 import { createMcpTransport } from './transports';
 import type {
@@ -247,64 +246,66 @@ async function discoverServerTools(
   options?: { cacheTtlMs?: number; signal?: AbortSignal },
 ): Promise<McpToolCacheEntry> {
   const startedAt = Date.now();
+  let descriptors: ToolDescriptor[];
   try {
     const transport = createMcpTransport(server);
     await initializeMcpServer(server, transport, { signal: options?.signal });
-    const descriptors = await listMcpTools(server, transport, { signal: options?.signal });
+    descriptors = await listMcpTools(server, transport, { signal: options?.signal });
     throwIfMcpExecutionAborted(options?.signal);
-    const completedAt = Date.now();
-    const health: McpServerHealth = {
-      serverId: server.id,
-      status: 'ready',
-      checkedAt: completedAt,
-      latencyMs: completedAt - startedAt,
-      toolCount: descriptors.length,
-      error: null,
-    };
-    const entry: McpToolCacheEntry = {
-      serverId: server.id,
-      descriptors,
-      refreshedAt: completedAt,
-      expiresAt: completedAt + (options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS),
-      health,
-    };
-    await saveMcpToolCache(entry);
-    await updateMcpServerHealth(server.id, {
-      status: 'ready',
-      lastConnectedAt: completedAt,
-      lastError: null,
-    });
-    return entry;
   } catch (err) {
     throwIfMcpExecutionAborted(options?.signal);
-    const completedAt = Date.now();
-    const message = err instanceof Error ? err.message : String(err);
-    const previousCache = await getMcpToolCache(server.id);
-    throwIfMcpExecutionAborted(options?.signal);
-    const descriptors = previousCache?.descriptors ?? [];
-    const health: McpServerHealth = {
-      serverId: server.id,
-      status: 'error',
-      checkedAt: completedAt,
-      latencyMs: completedAt - startedAt,
-      toolCount: descriptors.length,
-      error: message,
-    };
-    const entry: McpToolCacheEntry = {
-      serverId: server.id,
-      descriptors,
-      refreshedAt: previousCache?.refreshedAt ?? completedAt,
-      expiresAt: previousCache?.expiresAt
-        ?? completedAt + Math.min(options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, 30_000),
-      health,
-    };
-    await saveMcpToolCache(entry);
-    await updateMcpServerHealth(server.id, {
-      status: 'error',
-      lastError: message,
-    });
-    return entry;
+    return persistMcpDiscoveryFailure(server, startedAt, err, options);
   }
+
+  const completedAt = Date.now();
+  const health: McpServerHealth = {
+    serverId: server.id,
+    status: 'ready',
+    checkedAt: completedAt,
+    latencyMs: completedAt - startedAt,
+    toolCount: descriptors.length,
+    error: null,
+  };
+  const entry: McpToolCacheEntry = {
+    serverId: server.id,
+    descriptors,
+    refreshedAt: completedAt,
+    expiresAt: completedAt + (options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS),
+    health,
+  };
+  await saveMcpDiscoveryResult(entry);
+  return entry;
+}
+
+async function persistMcpDiscoveryFailure(
+  server: McpServerConfig,
+  startedAt: number,
+  providerError: unknown,
+  options?: { cacheTtlMs?: number; signal?: AbortSignal },
+): Promise<McpToolCacheEntry> {
+  const completedAt = Date.now();
+  const message = providerError instanceof Error ? providerError.message : String(providerError);
+  const previousCache = await getMcpToolCache(server.id);
+  throwIfMcpExecutionAborted(options?.signal);
+  const descriptors = previousCache?.descriptors ?? [];
+  const health: McpServerHealth = {
+    serverId: server.id,
+    status: 'error',
+    checkedAt: completedAt,
+    latencyMs: completedAt - startedAt,
+    toolCount: descriptors.length,
+    error: message,
+  };
+  const entry: McpToolCacheEntry = {
+    serverId: server.id,
+    descriptors,
+    refreshedAt: previousCache?.refreshedAt ?? completedAt,
+    expiresAt: previousCache?.expiresAt
+      ?? completedAt + Math.min(options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS, 30_000),
+    health,
+  };
+  await saveMcpDiscoveryResult(entry);
+  return entry;
 }
 
 function throwIfMcpExecutionAborted(signal?: AbortSignal): void {

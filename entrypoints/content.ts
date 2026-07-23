@@ -177,6 +177,7 @@ import {
   type ContentMutationHub,
 } from './content/controllers/mutation-hub';
 import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
+import { mutationMayAffectRestoredMessageTarget } from './content/restored-message-targets';
 import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
 
 const TOOL_BLOCK_ID = 'dpp-tool-block';
@@ -6313,9 +6314,21 @@ function startRenderedToolCallCleaner(
     matches: (mutations) => (
       toolCapabilityScope === scope
       && scope.active
-      && mutations.some(mutationMayContainCleanableText)
+      && mutations.some((mutation) => (
+        mutationMayContainCleanableText(mutation) ||
+        (restoredToolRecords.size > 0 && mutationMayAffectRestoredMessageTarget(mutation))
+      ))
     ),
-    handle: schedule,
+    handle(mutations) {
+      schedule();
+      if (
+        restoredToolRecords.size > 0 &&
+        mutations.some(mutationMayAffectRestoredMessageTarget)
+      ) {
+        restoredRenderAttempts = 0;
+        scheduleRenderRestoredToolBlocks();
+      }
+    },
   }));
 }
 
@@ -6409,7 +6422,10 @@ function startInlineAgentContinuationMessageHider(
     matches: (mutations) => (
       inlineAgentCapabilityScope === scope
       && scope.active
-      && mutations.some(mutationMayContainInlineAgentContinuation)
+      && mutations.some((mutation) => (
+        mutationMayContainInlineAgentContinuation(mutation) ||
+        (restoredInlineAgentTraces.size > 0 && mutationMayAffectRestoredMessageTarget(mutation))
+      ))
     ),
     handle(mutations) {
       const roots = new Set<ParentNode>();
@@ -6429,6 +6445,13 @@ function startInlineAgentContinuationMessageHider(
       }
 
       roots.forEach(hideInlineAgentContinuationMessages);
+      if (
+        restoredInlineAgentTraces.size > 0 &&
+        mutations.some(mutationMayAffectRestoredMessageTarget)
+      ) {
+        restoredInlineAgentRenderAttempts = 0;
+        scheduleRenderRestoredInlineAgentTraces();
+      }
     },
   }));
 }

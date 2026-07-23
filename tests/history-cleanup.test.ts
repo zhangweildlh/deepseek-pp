@@ -2,9 +2,39 @@ import { describe, expect, it } from 'vitest';
 import { stripToolCallsFromHistory } from '../core/interceptor/history-cleanup';
 import { createArtifactToolDescriptors } from '../core/artifact';
 import { INLINE_AGENT_CONTINUATION_PLACEHOLDER } from '../core/inline-agent/prompt';
+import { markVisibleUserPrompt } from '../core/prompt/visibility';
 import { createDefaultToolDescriptors } from '../core/tool';
 
 describe('history cleanup', () => {
+  it('restores only the user input from a Skill-wrapped history turn', () => {
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [{
+            message_id: 0,
+            message_role: 'user',
+            content: markVisibleUserPrompt([
+              'Follow the private Skill instructions.',
+              '',
+              '---',
+              '',
+              'The following is the user input for this turn. Follow the instructions above when handling it:',
+              '',
+              'Inspect the project folder.',
+            ].join('\n')),
+          }],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: createDefaultToolDescriptors(),
+      onToolCallsRestored: () => undefined,
+    });
+
+    expect(json.data.biz_data.chat_messages[0].content).toBe('Inspect the project folder.');
+  });
+
   it('keeps inline-agent continuation prompt nodes but marks them as hidden internal turns', () => {
     const json = {
       data: {
