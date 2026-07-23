@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1115-release-highlights">1.11.5 Highlights</a>
+  <a href="#1116-release-highlights">1.11.6 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.5 Release Highlights](#1115-release-highlights)
+- [1.11.6 Release Highlights](#1116-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,21 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.5 Release Highlights
+## 1.11.6 Release Highlights
+
+1.11.6 focuses on reliable file generation, preventing unusually large output from freezing the page or returning after a reload when OfficeCLI and similar Skills create local documents.
+
+| Area | Main changes |
+|------|--------------|
+| File-generation crash protection | Adds a hard safety limit for abnormally large tool output and stops processing it before long encoded file data can freeze the page. |
+| Reload recovery | Cleans up unfinished, split, and whitespace-padded tool output in restored history so stale large content is not rendered again after a reload. |
+| Artifact boundary | Downloadable Artifacts are explicitly for UTF-8 text and code. Local binary files such as Office documents, PDFs, images, and archives should remain at their local path instead of being encoded into chat. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.5 - 0.2.0)</summary>
+
+### 1.11.5 Release Highlights
 
 1.11.5 focuses on reliable everyday chat, MCP connections, and Shell Host responsiveness, reducing interruptions caused by request-shape changes, overlapping refreshes, or long-running native tools.
 
@@ -310,9 +324,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | MCP tool refresh | Tests and refreshes for the same service run in order; a failed refresh keeps the last successfully discovered tools while clearly showing the connection error. |
 | Shell Host responsiveness | Tool lists and other control requests remain responsive during long native tool calls, Windows command-environment setup, or folder selection. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.4 - 0.2.0)</summary>
 
 ### 1.11.4 Release Highlights
 
