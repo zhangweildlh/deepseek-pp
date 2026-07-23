@@ -1,10 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import { stripToolCallsFromHistory } from '../core/interceptor/history-cleanup';
+import { augmentRequestBody } from '../core/interceptor/request-augmentation';
 import { createArtifactToolDescriptors } from '../core/artifact';
 import { INLINE_AGENT_CONTINUATION_PLACEHOLDER } from '../core/inline-agent/prompt';
 import { createDefaultToolDescriptors } from '../core/tool';
 
 describe('history cleanup', () => {
+  it('restores the exact no-argument Skill command without exposing instructions', () => {
+    const augmented = augmentRequestBody(JSON.stringify({
+      prompt: '/shell',
+      parent_message_id: null,
+      thinking_enabled: false,
+    }), {
+      memories: [],
+      skills: [{
+        name: 'shell',
+        instructions: 'Private Shell Skill instructions.',
+        memoryEnabled: false,
+      }],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: [],
+      messageCount: 0,
+      locale: 'en',
+    });
+    const storedPrompt = JSON.parse(augmented?.body ?? '{}').prompt;
+    const json = {
+      data: {
+        biz_data: {
+          chat_messages: [{
+            message_id: 0,
+            message_role: 'user',
+            content: storedPrompt,
+          }],
+        },
+      },
+    };
+
+    stripToolCallsFromHistory(json, {
+      toolDescriptors: createDefaultToolDescriptors(),
+      onToolCallsRestored: () => undefined,
+    });
+
+    expect(json.data.biz_data.chat_messages[0].content).toBe('/shell');
+  });
+
   it('keeps inline-agent continuation prompt nodes but marks them as hidden internal turns', () => {
     const json = {
       data: {

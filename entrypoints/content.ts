@@ -177,10 +177,13 @@ import {
   type ContentMutationHub,
 } from './content/controllers/mutation-hub';
 import { notifyContentAuthStatusChanged } from './content/auth-status-notifier';
+import { getRestoredMessageMutationAction } from './content/restored-message-targets';
 import { bindNewChatToolCallToBrowserSession } from './content/tool-session-binding';
 
 const TOOL_BLOCK_ID = 'dpp-tool-block';
 const TOOL_BLOCK_STYLE_ID = 'dpp-tool-block-css';
+const RESTORED_TOOL_UI_SELECTOR = '.dpp-tool-block, .dpp-artifact-results';
+const RESTORED_INLINE_AGENT_UI_SELECTOR = '.dpp-agent-container[data-restored="true"]';
 const ASSISTANT_RESPONSE_CONTENT_SELECTOR = '._74c0879, .ds-assistant-message-main-content';
 const REASONING_HOST_META_RE = /\b(?:reason|reasoning|think|thinking|thought)\b/i;
 const REASONING_HOST_TEXT_RE = /^(?:已(?:深度)?思考|深度思考|思考过程|思考中|正在思考|thinking|reasoning|thought)(?:[\s（(:：]|$)/i;
@@ -334,6 +337,7 @@ let historyOrganizerController: HistoryOrganizerController | null = null;
 let projectSidebarOrganizerController: ProjectSidebarOrganizerController | null = null;
 let contentUxPolishController: ContentUxPolishController | null = null;
 const restoredToolRecords = new Map<string, ToolCallRestoreRecord>();
+const pendingRestoredToolRecordIds = new Set<string>();
 let restoredRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let restoredRenderAttempts = 0;
 const pendingToolExecutionTasks = new Set<Promise<ToolCardResult>>();
@@ -367,6 +371,7 @@ let inlineAgentTraceWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let inlineAgentStreamRenderFrame: number | null = null;
 let pendingInlineAgentStreamChunk: InlineAgentStreamChunkMsg | null = null;
 const restoredInlineAgentTraces = new Map<string, InlineAgentTraceRecord>();
+const pendingRestoredInlineAgentTraceIds = new Set<string>();
 let restoredInlineAgentRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let restoredInlineAgentRenderAttempts = 0;
 let currentMemories: Memory[] = [];
@@ -717,6 +722,7 @@ async function stopToolCapability(): Promise<void> {
   toolBlockEl = null;
   activeToolBlockSessions.clear();
   restoredToolRecords.clear();
+  pendingRestoredToolRecordIds.clear();
   activeToolAuthorizations.clear();
   toolAuthorizationRequestAliases.clear();
   inlineAgentAuthorizationRequestKeys.clear();
@@ -764,6 +770,7 @@ async function stopInlineAgentCapability(): Promise<void> {
   }
   responseGeneration += 1;
   restoredInlineAgentTraces.clear();
+  pendingRestoredInlineAgentTraceIds.clear();
   restoredInlineAgentRenderAttempts = 0;
   document.querySelectorAll('.dpp-agent-container').forEach((node) => node.remove());
   removeInlineAgentStyles();
@@ -4335,6 +4342,12 @@ function handleToolBlockRouteChange() {
   const nextRouteKey = getTokenSpeedRouteKey();
   if (nextRouteKey === toolBlockRouteKey) return;
   toolBlockRouteKey = nextRouteKey;
+  restoredToolRecords.clear();
+  pendingRestoredToolRecordIds.clear();
+  restoredInlineAgentTraces.clear();
+  pendingRestoredInlineAgentTraceIds.clear();
+  restoredRenderAttempts = 0;
+  restoredInlineAgentRenderAttempts = 0;
 
   const activeSession = getActiveToolBlockSession();
   if (activeSession && !isToolBlockSessionOnCurrentRoute(activeSession)) {
@@ -4345,7 +4358,13 @@ function handleToolBlockRouteChange() {
   renderActiveToolBlockForCurrentRoute();
   const scope = toolCapabilityScope;
   if (scope) {
-    observeReportedPersistence(restorePersistedToolBlocks(scope, toolCapabilityEpoch));
+    const epoch = ++toolCapabilityEpoch;
+    observeReportedPersistence(restorePersistedToolBlocks(scope, epoch));
+  }
+  const inlineScope = inlineAgentCapabilityScope;
+  if (inlineScope) {
+    const epoch = ++inlineAgentCapabilityEpoch;
+    observeReportedPersistence(restorePersistedInlineAgentTraces(inlineScope, epoch));
   }
   scheduleRenderRestoredToolBlocks();
 }
@@ -4730,6 +4749,7 @@ async function restorePersistedInlineAgentTraces(
   for (const trace of traces) {
     if (!shouldTryRestoreInlineAgentTrace(trace, url) || restoredInlineAgentTraces.has(trace.id)) continue;
     restoredInlineAgentTraces.set(trace.id, normalizeRestoredInlineAgentTrace(trace));
+    pendingRestoredInlineAgentTraceIds.add(trace.id);
     changed = true;
   }
 
@@ -4864,6 +4884,7 @@ async function persistToolBlockSession(session: ActiveToolBlockSession, fullText
   );
   if (toolCapabilityScope?.active) {
     restoredToolRecords.set(block.id, block);
+    pendingRestoredToolRecordIds.add(block.id);
     scheduleRenderRestoredToolBlocks();
   }
 }
@@ -4945,12 +4966,14 @@ function rememberRestoredToolRecords(records: ToolCallRestoreRecord[] | undefine
     if (compatibleId) {
       const existing = restoredToolRecords.get(compatibleId)!;
       restoredToolRecords.set(compatibleId, mergeToolRestoreRecords(existing, record));
+      pendingRestoredToolRecordIds.add(compatibleId);
       changed = true;
       continue;
     }
 
     if (restoredToolRecords.has(record.id)) continue;
     restoredToolRecords.set(record.id, record);
+    pendingRestoredToolRecordIds.add(record.id);
     changed = true;
   }
 
@@ -5818,7 +5841,25 @@ function isDetachedArtifactToolResult(result: ToolCardResult): boolean {
   );
 }
 
+function requeueRestoredToolRecordsForCurrentRoute(): void {
+  for (const [id, record] of restoredToolRecords) {
+    if (record.source !== 'storage' || isToolRecordOnCurrentRoute(record)) {
+      pendingRestoredToolRecordIds.add(id);
+    }
+  }
+}
+
+function requeueRestoredInlineAgentTracesForCurrentRoute(): void {
+  const currentUrl = getToolBlockUrl();
+  for (const [id, trace] of restoredInlineAgentTraces) {
+    if (shouldTryRestoreInlineAgentTrace(trace, currentUrl)) {
+      pendingRestoredInlineAgentTraceIds.add(id);
+    }
+  }
+}
+
 function scheduleRenderRestoredToolBlocks() {
+  if (pendingRestoredToolRecordIds.size === 0) return;
   if (restoredRenderTimer) return;
 
   restoredRenderTimer = setTimeout(() => {
@@ -5837,35 +5878,51 @@ function renderRestoredToolBlocks(): number {
   injectToolBlockStyles();
 
   const messages = getAssistantMessages();
-  if (messages.length === 0) return restoredToolRecords.size;
+  if (messages.length === 0) return pendingRestoredToolRecordIds.size;
 
-  let missing = 0;
   const usedMessages = new Set<Element>();
 
-  for (const record of restoredToolRecords.values()) {
-    if (findRestoredToolBlock(record.id)) continue;
-
-    const target = findRestoredToolTarget(record, messages, usedMessages);
-    if (!target) {
-      missing++;
+  for (const id of [...pendingRestoredToolRecordIds]) {
+    const record = restoredToolRecords.get(id);
+    if (!record) {
+      pendingRestoredToolRecordIds.delete(id);
+      continue;
+    }
+    const existingBlock = findRestoredToolBlock(record.id) as HTMLElement | null;
+    if (existingBlock) {
+      const executions = getRestoredExecutions(record);
+      if (executions.length > 0) {
+        updateToolBlockContent(existingBlock, executions);
+        const target = existingBlock.closest('.ds-message');
+        if (target) renderDetachedArtifactResults(target, record.id, executions, existingBlock);
+      }
+      pendingRestoredToolRecordIds.delete(id);
       continue;
     }
 
+    const target = findRestoredToolTarget(record, messages, usedMessages);
+    if (!target) continue;
+
     const executions = getRestoredExecutions(record);
-    if (executions.length === 0) continue;
+    if (executions.length === 0) {
+      pendingRestoredToolRecordIds.delete(id);
+      continue;
+    }
 
     const block = createToolBlockShell({ restoreId: record.id, collapsed: true });
     updateToolBlockContent(block, executions);
     appendToolBlockToMessage(target, block);
     renderDetachedArtifactResults(target, record.id, executions, block);
     usedMessages.add(target);
+    pendingRestoredToolRecordIds.delete(id);
   }
 
   cleanRenderedToolCalls();
-  return missing;
+  return pendingRestoredToolRecordIds.size;
 }
 
 function scheduleRenderRestoredInlineAgentTraces() {
+  if (pendingRestoredInlineAgentTraceIds.size === 0) return;
   if (restoredInlineAgentRenderTimer) return;
 
   restoredInlineAgentRenderTimer = setTimeout(() => {
@@ -5884,27 +5941,35 @@ function renderRestoredInlineAgentTraces(): number {
   injectInlineAgentStyles();
 
   const messages = getAssistantMessages();
-  if (messages.length === 0) return restoredInlineAgentTraces.size;
+  if (messages.length === 0) return pendingRestoredInlineAgentTraceIds.size;
 
-  let missing = 0;
   const usedMessages = new Set<Element>();
 
-  for (const trace of restoredInlineAgentTraces.values()) {
-    if (findRestoredInlineAgentTrace(trace.id)) continue;
-    if (trace.steps.length === 0) continue;
-
-    const target = findRestoredInlineAgentTarget(trace, messages, usedMessages);
-    if (!target) {
-      missing++;
+  for (const id of [...pendingRestoredInlineAgentTraceIds]) {
+    const trace = restoredInlineAgentTraces.get(id);
+    if (!trace) {
+      pendingRestoredInlineAgentTraceIds.delete(id);
       continue;
     }
+    if (findRestoredInlineAgentTrace(trace.id)) {
+      pendingRestoredInlineAgentTraceIds.delete(id);
+      continue;
+    }
+    if (trace.steps.length === 0) {
+      pendingRestoredInlineAgentTraceIds.delete(id);
+      continue;
+    }
+
+    const target = findRestoredInlineAgentTarget(trace, messages, usedMessages);
+    if (!target) continue;
 
     const container = createRestoredInlineAgentContainer(trace);
     mountRestoredInlineAgentContainer(target, container, trace);
     usedMessages.add(target);
+    pendingRestoredInlineAgentTraceIds.delete(id);
   }
 
-  return missing;
+  return pendingRestoredInlineAgentTraceIds.size;
 }
 
 function findRestoredInlineAgentTrace(id: string): Element | null {
@@ -6310,12 +6375,26 @@ function startRenderedToolCallCleaner(
   schedule();
 
   scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      toolCapabilityScope === scope
-      && scope.active
-      && mutations.some(mutationMayContainCleanableText)
-    ),
-    handle: schedule,
+    matches: (mutations) => {
+      if (toolCapabilityScope !== scope || !scope.active) return false;
+      const restoreAction = getRestoredMessageMutationAction(mutations, {
+        hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
+        restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
+      });
+      return restoreAction.schedulePendingRender || mutations.some(mutationMayContainCleanableText);
+    },
+    handle(mutations) {
+      const restoreAction = getRestoredMessageMutationAction(mutations, {
+        hasPendingRecords: pendingRestoredToolRecordIds.size > 0,
+        restoredUiSelector: RESTORED_TOOL_UI_SELECTOR,
+      });
+      if (restoreAction.requeueMountedRecords) requeueRestoredToolRecordsForCurrentRoute();
+      schedule();
+      if (restoreAction.schedulePendingRender && pendingRestoredToolRecordIds.size > 0) {
+        restoredRenderAttempts = 0;
+        scheduleRenderRestoredToolBlocks();
+      }
+    },
   }));
 }
 
@@ -6406,12 +6485,20 @@ function startInlineAgentContinuationMessageHider(
 ) {
   hideInlineAgentContinuationMessages(document);
   scope.addCleanup('cleanup', mutationHub.subscribe({
-    matches: (mutations) => (
-      inlineAgentCapabilityScope === scope
-      && scope.active
-      && mutations.some(mutationMayContainInlineAgentContinuation)
-    ),
+    matches: (mutations) => {
+      if (inlineAgentCapabilityScope !== scope || !scope.active) return false;
+      const restoreAction = getRestoredMessageMutationAction(mutations, {
+        hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
+        restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
+      });
+      return restoreAction.schedulePendingRender || mutations.some(mutationMayContainInlineAgentContinuation);
+    },
     handle(mutations) {
+      const restoreAction = getRestoredMessageMutationAction(mutations, {
+        hasPendingRecords: pendingRestoredInlineAgentTraceIds.size > 0,
+        restoredUiSelector: RESTORED_INLINE_AGENT_UI_SELECTOR,
+      });
+      if (restoreAction.requeueMountedRecords) requeueRestoredInlineAgentTracesForCurrentRoute();
       const roots = new Set<ParentNode>();
       for (const mutation of mutations) {
         if (mutation.type === 'characterData') {
@@ -6429,6 +6516,10 @@ function startInlineAgentContinuationMessageHider(
       }
 
       roots.forEach(hideInlineAgentContinuationMessages);
+      if (restoreAction.schedulePendingRender && pendingRestoredInlineAgentTraceIds.size > 0) {
+        restoredInlineAgentRenderAttempts = 0;
+        scheduleRenderRestoredInlineAgentTraces();
+      }
     },
   }));
 }

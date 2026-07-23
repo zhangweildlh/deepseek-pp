@@ -10,12 +10,13 @@ import {
   type ToolInvocationCatalog,
 } from '../tool';
 import { estimateTokens, formatMemoriesBlock, getMemoryBudget, selectMemories } from '../memory/selector';
-import { markVisibleUserPrompt } from './visibility';
+import { markVisibleUserPrompt, markVisibleUserPromptMetadata } from './visibility';
 
 export interface PromptAugmentationOptions {
   memories?: readonly Memory[];
   thinkingEnabled?: boolean;
   identityOnly?: boolean;
+  visibleUserPrompt?: string;
   presetContent?: string | null;
   projectContext?: string | null;
   toolDescriptors?: readonly ToolDescriptor[];
@@ -47,6 +48,9 @@ export function buildPromptAugmentation(
     forceResponseLanguage = null,
   } = options ?? {};
   const toolDescriptors = options?.toolDescriptors ?? createDefaultToolDescriptors(locale);
+  const visiblePromptMetadata = options?.visibleUserPrompt === undefined
+    ? ''
+    : `${markVisibleUserPromptMetadata(options.visibleUserPrompt)}\n`;
 
   const promptTokens = estimateTokens(originalPrompt);
   const budget = getMemoryBudget(promptTokens);
@@ -79,7 +83,7 @@ export function buildPromptAugmentation(
   const systemPrefix = system ? `${system}\n\n` : '';
 
   return {
-    augmented: presetPrefix + systemPrefix + markVisibleUserPrompt(originalPrompt) + toolReminder,
+    augmented: presetPrefix + systemPrefix + visiblePromptMetadata + markVisibleUserPrompt(originalPrompt) + toolReminder,
     usedMemoryIds: selected.map((memory) => memory.id!).filter(Boolean),
     renderedToolCount: systemPromptEnabled ? toolDescriptors.length : 0,
   };

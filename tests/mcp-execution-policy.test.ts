@@ -14,16 +14,18 @@ import { renderToolSchemas } from '../core/prompt/augmentation';
 import type { McpServerConfig, ToolCall, ToolDescriptor } from '../core/types';
 
 let storage: Record<string, unknown>;
+let storageSet: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   storage = {};
+  storageSet = vi.fn(async (values: Record<string, unknown>) => {
+    storage = { ...storage, ...values };
+  });
   vi.stubGlobal('chrome', {
     storage: {
       local: {
         get: vi.fn(async (key: string) => ({ [key]: storage[key] })),
-        set: vi.fn(async (values: Record<string, unknown>) => {
-          storage = { ...storage, ...values };
-        }),
+        set: storageSet,
       },
     },
     permissions: {
@@ -118,6 +120,7 @@ describe('MCP execution policy', () => {
     if (!sparseServer) throw new Error('Missing persisted MCP server.');
     sparseServer.secrets = [{ kind: 'bearer', value: '' }];
     storage[MCP_STORAGE_KEY] = sparseState;
+    storageSet.mockClear();
 
     const cache = await refreshMcpServerDiscovery(server.id);
 
@@ -147,6 +150,7 @@ describe('MCP execution policy', () => {
     expect(requests[0].headers.get('MCP-Protocol-Version')).toBeNull();
     expect(requests[1].headers.get('MCP-Protocol-Version')).toBe(MCP_PROTOCOL_VERSION);
     expect(requests[2].headers.get('MCP-Protocol-Version')).toBe(MCP_PROTOCOL_VERSION);
+    expect(storageSet).toHaveBeenCalledTimes(1);
   });
 
   it('does not persist an error cache when stale discovery is cancelled', async () => {
@@ -180,6 +184,78 @@ describe('MCP execution policy', () => {
     });
   });
 
+  it('rejects a discovery result when connection configuration changes during provider I/O', async () => {
+    const oldUrl = 'http://127.0.0.1:48130/mcp';
+    const newUrl = 'http://127.0.0.1:48131/mcp';
+    const firstInitialize = deferred<Response>();
+    let firstInitializeId: string | null = null;
+    const requests: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { id?: string; method: string };
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      requests.push({ url, method: request.method });
+
+      if (url === oldUrl && request.method === 'initialize') {
+        firstInitializeId = request.id ?? null;
+        return firstInitialize.promise;
+      }
+      if (request.method === 'notifications/initialized') return new Response(null, { status: 202 });
+
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id ?? null,
+        result: request.method === 'tools/list'
+          ? {
+              tools: [{
+                name: url === newUrl ? 'new_tool' : 'old_tool',
+                description: 'Configuration-bound discovery tool.',
+                inputSchema: { type: 'object', properties: {} },
+              }],
+            }
+          : { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const server = await createMcpServer({
+      displayName: 'Mutable Discovery MCP',
+      enabled: true,
+      transport: { kind: 'streamable_http', url: oldUrl },
+    });
+    const pending = refreshMcpServerDiscovery(server.id);
+    await vi.waitFor(() => expect(requests).toContainEqual({ url: oldUrl, method: 'initialize' }));
+
+    await updateMcpServer(server.id, {
+      transport: { kind: 'streamable_http', url: newUrl },
+    });
+    firstInitialize.resolve(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: firstInitializeId,
+      result: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'mcp_discovery_config_changed',
+      retryable: true,
+    });
+    await expect(getMcpToolCache(server.id)).resolves.toBeNull();
+    await expect(getMcpServerById(server.id)).resolves.toMatchObject({
+      transport: { kind: 'streamable_http', url: newUrl },
+      status: 'unknown',
+      lastConnectedAt: null,
+      lastError: null,
+    });
+
+    const refreshed = await refreshMcpServerDiscovery(server.id);
+    expect(refreshed.descriptors.map((descriptor) => descriptor.name)).toEqual(['new_tool']);
+    await expect(getMcpToolCache(server.id)).resolves.toMatchObject({
+      descriptors: [expect.objectContaining({ name: 'new_tool' })],
+      health: { status: 'ready' },
+    });
+  });
+
   it('keeps the last successful tool snapshot when a refresh fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new TypeError('provider offline');
@@ -204,6 +280,7 @@ describe('MCP execution policy', () => {
         error: null,
       },
     });
+    storageSet.mockClear();
 
     const failed = await refreshMcpServerDiscovery(server.id);
 
@@ -221,6 +298,47 @@ describe('MCP execution policy', () => {
       status: 'error',
       lastError: expect.stringContaining('Cannot reach MCP server'),
     });
+    expect(storageSet).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not recast discovery persistence failures as provider failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { id?: string; method: string };
+      if (body.method === 'notifications/initialized') {
+        return new Response(null, { status: 202 });
+      }
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: body.id ?? null,
+        result: body.method === 'tools/list'
+          ? {
+              tools: [{
+                name: 'persisted_tool',
+                description: 'Must not be reported as a provider failure.',
+                inputSchema: { type: 'object', properties: {} },
+              }],
+            }
+          : { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const server = await createMcpServer({
+      displayName: 'Persistence Failure MCP',
+      enabled: true,
+      transport: { kind: 'http', url: 'http://127.0.0.1:48129/mcp' },
+    });
+    const before = await getMcpServerById(server.id);
+    const persistenceError = new Error('MCP storage write failed');
+    storageSet.mockClear();
+    storageSet.mockRejectedValueOnce(persistenceError);
+
+    await expect(refreshMcpServerDiscovery(server.id)).rejects.toBe(persistenceError);
+    await expect(getMcpToolCache(server.id)).resolves.toBeNull();
+    await expect(getMcpServerById(server.id)).resolves.toMatchObject({
+      status: before?.status,
+      lastConnectedAt: before?.lastConnectedAt,
+      lastError: before?.lastError,
+    });
+    expect(storageSet).toHaveBeenCalledTimes(1);
   });
 
   it('serializes discovery per server without poisoning the queue after failure', async () => {

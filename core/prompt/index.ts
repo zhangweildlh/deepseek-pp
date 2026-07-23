@@ -9,6 +9,7 @@ export {
   containsInternalPromptMarker,
   extractVisibleUserPrompt,
   markVisibleUserPrompt,
+  markVisibleUserPromptMetadata,
   sanitizeInternalPromptText,
 } from './visibility';
 

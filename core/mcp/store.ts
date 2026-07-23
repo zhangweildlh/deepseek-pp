@@ -23,6 +23,16 @@ import {
 const REDACTED_SECRET_VALUE = '********';
 const mcpStorageOperations = createSerialOperationQueue();
 
+export class McpDiscoveryConfigChangedError extends Error {
+  readonly code = 'mcp_discovery_config_changed';
+  readonly retryable = true;
+
+  constructor(serverId: McpServerId) {
+    super(`MCP server configuration changed during discovery: ${serverId}`);
+    this.name = 'McpDiscoveryConfigChangedError';
+  }
+}
+
 export async function getAllMcpServers(options?: { includeSecrets?: boolean }): Promise<McpServerConfig[]> {
   return mcpStorageOperations.run(async () => {
     const state = await readStateAlreadyOwned();
@@ -126,13 +136,7 @@ export async function updateMcpServer(
   });
 }
 
-/**
- * Records connection health without treating it as a configuration mutation.
- *
- * Discovery writes its cache immediately before this update. Running the
- * configuration normalizer here can alter a valid legacy/sparse record and
- * make the generic cache-invalidation path delete that freshly written cache.
- */
+/** Records connection health without treating it as a configuration mutation. */
 export async function updateMcpServerHealth(
   id: McpServerId,
   patch: Partial<Pick<McpServerConfig, 'status' | 'lastConnectedAt' | 'lastError'>>,
@@ -142,15 +146,7 @@ export async function updateMcpServerHealth(
     let updated: McpServerConfig | null = null;
     const servers = state.servers.map((server) => {
       if (server.id !== id) return server;
-      updated = {
-        ...server,
-        status: resolveMcpServerHealthStatus(server, patch),
-        lastConnectedAt: patch.lastConnectedAt === undefined
-          ? server.lastConnectedAt
-          : patch.lastConnectedAt,
-        lastError: patch.lastError === undefined ? server.lastError : patch.lastError,
-        updatedAt: Date.now(),
-      };
+      updated = applyMcpServerHealthPatch(server, patch);
       return updated;
     });
 
@@ -190,6 +186,45 @@ export async function saveMcpToolCache(entry: McpToolCacheEntry): Promise<void> 
     const state = await readStateAlreadyOwned();
     await writeStateAlreadyOwned({
       ...state,
+      toolCaches: [entry, ...state.toolCaches.filter((cache) => cache.serverId !== entry.serverId)],
+    });
+  });
+}
+
+/**
+ * Persists one discovery result and its matching server health as a single
+ * whole-key commit. This prevents readers from observing a cache/health split
+ * and keeps concurrent allowlist or execution-policy changes on the latest
+ * server record owned by the storage queue.
+ */
+export async function saveMcpDiscoveryResult(
+  entry: McpToolCacheEntry,
+  expectedServer: McpServerConfig,
+): Promise<void> {
+  await mcpStorageOperations.run(async () => {
+    const state = await readStateAlreadyOwned();
+    const currentServer = state.servers.find((server) => server.id === entry.serverId);
+    if (!currentServer) {
+      throw new Error(`MCP server not found during discovery commit: ${entry.serverId}`);
+    }
+    if (mcpDiscoveryFingerprint(currentServer) !== mcpDiscoveryFingerprint(expectedServer)) {
+      throw new McpDiscoveryConfigChangedError(entry.serverId);
+    }
+
+    const servers = state.servers.map((server) => {
+      if (server.id !== entry.serverId) return server;
+      return applyMcpServerHealthPatch(server, {
+        status: entry.health.status,
+        lastConnectedAt: entry.health.status === 'ready'
+          ? entry.health.checkedAt
+          : undefined,
+        lastError: entry.health.error,
+      });
+    });
+
+    await writeStateAlreadyOwned({
+      ...state,
+      servers,
       toolCaches: [entry, ...state.toolCaches.filter((cache) => cache.serverId !== entry.serverId)],
     });
   });
@@ -303,6 +338,21 @@ function resolveMcpServerHealthStatus(
 ): McpServerStatus {
   if (!server.enabled) return 'disabled';
   return patch.status ?? server.status;
+}
+
+function applyMcpServerHealthPatch(
+  server: McpServerConfig,
+  patch: Partial<Pick<McpServerConfig, 'status' | 'lastConnectedAt' | 'lastError'>>,
+): McpServerConfig {
+  return {
+    ...server,
+    status: resolveMcpServerHealthStatus(server, patch),
+    lastConnectedAt: patch.lastConnectedAt === undefined
+      ? server.lastConnectedAt
+      : patch.lastConnectedAt,
+    lastError: patch.lastError === undefined ? server.lastError : patch.lastError,
+    updatedAt: Date.now(),
+  };
 }
 
 function normalizeServerStatus(

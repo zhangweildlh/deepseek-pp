@@ -5,7 +5,7 @@ import {
   decodeAugmentableDeepSeekRequestBody,
   decodeDeepSeekRequestBody,
 } from '../core/interceptor/request-augmentation';
-import { buildPromptAugmentation } from '../core/prompt';
+import { buildPromptAugmentation, extractVisibleUserPrompt } from '../core/prompt';
 
 describe('augmentRequestBody', () => {
   it('strictly decodes one plain-object request with a non-empty string prompt', () => {
@@ -245,6 +245,32 @@ describe('augmentRequestBody', () => {
     const body = JSON.parse(result?.body ?? '{}') as { prompt?: string };
     expect(body.prompt).toContain('The following is the user input for this turn');
     expect(body.prompt).toContain('Draft about {raw_user_value}');
+    expect(extractVisibleUserPrompt(body.prompt ?? ''))
+      .toBe('/writer Draft about {raw_user_value}');
+  });
+
+  it('keeps a no-argument Skill command as the visible prompt', () => {
+    const result = augmentRequestBody(JSON.stringify({
+      prompt: '/writer',
+      parent_message_id: null,
+      thinking_enabled: false,
+    }), {
+      memories: [],
+      skills: [{
+        name: 'writer',
+        instructions: 'Private writer instructions.',
+        memoryEnabled: false,
+      }],
+      activePreset: null,
+      modelType: null,
+      toolDescriptors: [],
+      messageCount: 0,
+      locale: 'en',
+    });
+
+    const body = JSON.parse(result?.body ?? '{}') as { prompt?: string };
+    expect(body.prompt).toContain('Private writer instructions.');
+    expect(extractVisibleUserPrompt(body.prompt ?? '')).toBe('/writer');
   });
 
   it('injects only global memories plus memories from the current project', () => {
