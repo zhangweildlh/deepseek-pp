@@ -223,6 +223,7 @@ export async function updateLocalSkillSource(
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
+      importBlock: { code: 'shell_discovery_failed' },
     };
   }
 }

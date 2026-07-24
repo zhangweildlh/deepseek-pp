@@ -125,7 +125,7 @@ export function augmentDecodedRequestBody(
 
   if (invocation) {
     const primarySkill = state.skills.find((s) => s.name === invocation.skillName);
-    if (isLocalIndexSkill(primarySkill)) {
+    if (primarySkill && isLocalIndexSkill(primarySkill)) {
       activeLocalSkillDir = primarySkill.remote?.localDirectory || undefined;
     }
     resolved = resolveSkills(state.skills, invocation.skillName, invocation.args, locale);

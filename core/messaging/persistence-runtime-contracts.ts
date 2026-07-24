@@ -114,6 +114,10 @@ export interface PersistenceRuntimeCommandContracts {
     request: DeclaredRuntimeRequest<'IMPORT_LOCAL_SKILL_SOURCE'>;
     response: LocalSkillImportResponse;
   };
+  UPDATE_LOCAL_SKILL_SOURCE: {
+    request: DeclaredRuntimeRequest<'UPDATE_LOCAL_SKILL_SOURCE'>;
+    response: LocalSkillImportResponse;
+  };
   RELOCATE_LOCAL_SKILL_SOURCE: {
     request: DeclaredRuntimeRequest<'RELOCATE_LOCAL_SKILL_SOURCE'>;
     response: LocalSkillImportResponse;

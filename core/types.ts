@@ -559,6 +559,7 @@ export type MessageAction =
   | { type: 'PREVIEW_LOCAL_SKILL_SOURCE'; payload: { rootPath: string } }
   | { type: 'PICK_LOCAL_SKILL_FOLDER'; payload?: { defaultPath?: string } }
   | { type: 'IMPORT_LOCAL_SKILL_SOURCE'; payload: LocalSkillImportRequest }
+  | { type: 'UPDATE_LOCAL_SKILL_SOURCE'; payload: { sourceId: string } }
   | { type: 'RELOCATE_LOCAL_SKILL_SOURCE'; payload: { sourceId: string; newRootPath: string } }
   | { type: 'CHECK_GITHUB_SKILL_SOURCE_UPDATES'; payload: { sourceId: string } }
   | { type: 'UPDATE_GITHUB_SKILL_SOURCE'; payload: { sourceId: string } }
