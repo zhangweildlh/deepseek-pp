@@ -153,6 +153,7 @@ export function augmentDecodedRequestBody(
       memories: scopedMemories,
       thinkingEnabled,
       identityOnly: !resolved.memoryEnabled,
+      visibleUserPrompt: originalPrompt,
       presetContent,
       projectContext: state.projectContext,
       toolDescriptors: state.toolDescriptors,

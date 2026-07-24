@@ -85,6 +85,7 @@ When the user reveals important durable information (identity, preference, behav
 Repository: deepseek-pp
 Invariant: preserve public behavior.
 
+<!-- deepseek-pp-visible-user-prompt:value=%22%2Fplanner%20reviewer%20Audit%20sync%20compatibility%22 -->
 <!-- deepseek-pp-visible-user-prompt:start -->
 Plan from explicit compatibility contracts.
 

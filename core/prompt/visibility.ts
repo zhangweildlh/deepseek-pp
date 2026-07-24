@@ -1,5 +1,7 @@
 export const VISIBLE_USER_PROMPT_START = '<!-- deepseek-pp-visible-user-prompt:start -->';
 export const VISIBLE_USER_PROMPT_END = '<!-- deepseek-pp-visible-user-prompt:end -->';
+const VISIBLE_USER_PROMPT_METADATA_PREFIX = '<!-- deepseek-pp-visible-user-prompt:value=';
+const VISIBLE_USER_PROMPT_METADATA_SUFFIX = ' -->';
 
 const TOOL_REMINDER_HEADING = 'Tool call format reminder:';
 const TOOL_REMINDER_REQUIRED_LINE = 'Available tool tag names:';
@@ -18,7 +20,14 @@ export function markVisibleUserPrompt(prompt: string): string {
   return `${VISIBLE_USER_PROMPT_START}\n${prompt}\n${VISIBLE_USER_PROMPT_END}`;
 }
 
+export function markVisibleUserPromptMetadata(prompt: string): string {
+  return `${VISIBLE_USER_PROMPT_METADATA_PREFIX}${encodeURIComponent(JSON.stringify(prompt))}${VISIBLE_USER_PROMPT_METADATA_SUFFIX}`;
+}
+
 export function extractVisibleUserPrompt(text: string): string | null {
+  const metadataPrompt = extractVisibleUserPromptMetadata(text);
+  if (metadataPrompt !== null) return metadataPrompt;
+
   const start = text.indexOf(VISIBLE_USER_PROMPT_START);
   if (start === -1) return null;
 
@@ -27,6 +36,29 @@ export function extractVisibleUserPrompt(text: string): string | null {
   if (end === -1) return null;
 
   return trimSingleBoundaryNewline(text.slice(contentStart, end));
+}
+
+function extractVisibleUserPromptMetadata(text: string): string | null {
+  const visiblePromptStart = text.indexOf(VISIBLE_USER_PROMPT_START);
+  if (visiblePromptStart === -1 || text[visiblePromptStart - 1] !== '\n') return null;
+
+  const metadataLineEnd = visiblePromptStart - 1;
+  const metadataLineStart = text.lastIndexOf('\n', metadataLineEnd - 1) + 1;
+  const metadataLine = text.slice(metadataLineStart, metadataLineEnd);
+  if (!metadataLine.startsWith(VISIBLE_USER_PROMPT_METADATA_PREFIX) ||
+    !metadataLine.endsWith(VISIBLE_USER_PROMPT_METADATA_SUFFIX)) {
+    return null;
+  }
+
+  const contentStart = VISIBLE_USER_PROMPT_METADATA_PREFIX.length;
+  const contentEnd = metadataLine.length - VISIBLE_USER_PROMPT_METADATA_SUFFIX.length;
+
+  try {
+    const decoded = JSON.parse(decodeURIComponent(metadataLine.slice(contentStart, contentEnd)));
+    return typeof decoded === 'string' ? decoded : null;
+  } catch {
+    return null;
+  }
 }
 
 export function sanitizeInternalPromptText(
@@ -46,7 +78,10 @@ export function sanitizeInternalPromptText(
 }
 
 export function containsInternalPromptMarker(text: string): boolean {
-  return text.includes(VISIBLE_USER_PROMPT_START) || containsToolFormatReminder(text) || isToolReminderOnly(text);
+  return text.includes(VISIBLE_USER_PROMPT_START) ||
+    text.includes(VISIBLE_USER_PROMPT_METADATA_PREFIX) ||
+    containsToolFormatReminder(text) ||
+    isToolReminderOnly(text);
 }
 
 function trimSingleBoundaryNewline(text: string): string {

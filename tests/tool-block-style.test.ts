@@ -95,6 +95,17 @@ describe('content tool block styles', () => {
     expect(source).toContain("data-dpp-hidden-inline-agent-continuation");
   });
 
+  it('retries persisted tool and inline-agent restoration when long histories mount late', () => {
+    const path = join(process.cwd(), 'entrypoints/content.ts');
+    const source = readFileSync(path, 'utf8');
+
+    expect(source).toContain("from './content/restored-message-targets';");
+    expect(source).toContain('restoredRenderAttempts = 0;');
+    expect(source).toContain('scheduleRenderRestoredToolBlocks();');
+    expect(source).toContain('restoredInlineAgentRenderAttempts = 0;');
+    expect(source).toContain('scheduleRenderRestoredInlineAgentTraces();');
+  });
+
   it('keeps permission banner text on the same injected theme contract', () => {
     const path = join(process.cwd(), 'entrypoints/content.ts');
     const source = readFileSync(path, 'utf8');
