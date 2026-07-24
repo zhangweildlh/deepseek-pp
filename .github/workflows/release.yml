@@ -117,8 +117,9 @@ jobs:
           fi
 
           if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN secret is required because deepseek-pp-shell-host@$VERSION is not published." >&2
-            exit 1
+            echo "NPM_TOKEN secret is not set; skipping npm publish of deepseek-pp-shell-host@$VERSION." >&2
+            echo "The GitHub Release will still be created without the published npm package." >&2
+            exit 0
           fi
 
           npm publish --workspace packages/shell-host --access public
