@@ -29,7 +29,7 @@
   <a href="#feature-overview">Feature Overview</a> ·
   <a href="#use-cases">Use Cases</a> ·
   <a href="#installation">Installation</a> ·
-  <a href="#1116-release-highlights">1.11.6 Highlights</a>
+  <a href="#1117-release-highlights">1.11.7 Highlights</a>
 </p>
 
 ## Product Positioning
@@ -46,7 +46,7 @@ Language can follow the browser or be set to English or Simplified Chinese. Deep
 - [Feature Overview](#feature-overview)
 - [Use Cases](#use-cases)
 - [Core Features](#core-features)
-- [1.11.6 Release Highlights](#1116-release-highlights)
+- [1.11.7 Release Highlights](#1117-release-highlights)
 - [Installation](#installation)
 - [Friendly Links](#friendly-links)
 
@@ -299,7 +299,21 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
   <img src="assets/screenshot-sidepanel-automation.png" width="300" alt="Automation task side panel">
 </p>
 
-## 1.11.6 Release Highlights
+## 1.11.7 Release Highlights
+
+1.11.7 focuses on reliable long-conversation restoration and MCP connections, reducing cases where restored tool records disappear after a reload, navigation, or message remount, or saved MCP service state falls out of sync.
+
+| Area | Main changes |
+|------|--------------|
+| Long-conversation restoration | Tool cards, Artifact results, and agent continuation records are restored when their message appears after a reload, route change, or incremental page mount. |
+| Conversation display | Restored history keeps the slash command the user actually entered, without showing a Skill's internal expanded instructions in the conversation. |
+| MCP connection state | Discovery results and service health are saved together; an older refresh result cannot overwrite a newer connection configuration. |
+| Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
+
+<details>
+<summary>Show historical release highlights (1.11.6 - 0.2.0)</summary>
+
+### 1.11.6 Release Highlights
 
 1.11.6 focuses on reliable file generation, preventing unusually large output from freezing the page or returning after a reload when OfficeCLI and similar Skills create local documents.
 
@@ -309,9 +323,6 @@ npm run shell:install -- --browser chrome --extension-id <extension-id>
 | Reload recovery | Cleans up unfinished, split, and whitespace-padded tool output in restored history so stale large content is not rendered again after a reload. |
 | Artifact boundary | Downloadable Artifacts are explicitly for UTF-8 text and code. Local binary files such as Office documents, PDFs, images, and archives should remain at their local path instead of being encoded into chat. |
 | Permission changes | Chrome, Edge, and Firefox add no browser permissions. |
-
-<details>
-<summary>Show historical release highlights (1.11.5 - 0.2.0)</summary>
 
 ### 1.11.5 Release Highlights
 
