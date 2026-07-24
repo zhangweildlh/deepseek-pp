@@ -43,7 +43,8 @@ export async function saveSkillAutoActivationSettings(
 export function normalizeSkillAutoActivationSettings(value: unknown): SkillAutoActivationSettings {
   const object = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<SkillAutoActivationSettings>
-    : {};
+    : null;
+  if (!object) return { ...DEFAULT_SKILL_AUTO_ACTIVATION_SETTINGS };
   let everyMessage = object.everyMessage === true;
   let firstMessage = object.firstMessage === true;
   // 强制不变式：每条消息开 ⇒ 首条开；首条关 ⇒ 每条关。

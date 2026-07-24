@@ -25,7 +25,7 @@ function splitParts(p: string): string[] {
   return p.split(SEP_RE).filter(Boolean);
 }
 
-// 在 root 之下解析 rel；若 rel 经 `..` 会逃出 root，返回 null（越界）。
+// 在 root 之下解析 rel；若 rel 经 `..` 会逃出文件系统根（out 为空），返回 null（越界）。
 export function joinUnderRoot(root: string, rel: string): string | null {
   const rootParts = splitParts(root);
   const relParts = splitParts(rel);
@@ -40,7 +40,25 @@ export function joinUnderRoot(root: string, rel: string): string | null {
     }
   }
   const sep = /[\\/]/.test(root) && root.includes('\\') ? '\\' : '/';
-  return out.join(sep);
+  let result = out.join(sep);
+  // 保留根的前导分隔符，使绝对路径根（如 /skills/demo）解析后仍是绝对路径（/skills/...）。
+  if ((root.startsWith('/') || root.startsWith('\\')) && !result.startsWith(sep)) {
+    result = sep + result;
+  }
+  return result;
+}
+
+// 判定 absPath 是否仍位于 root 之内（含等于 root）。absPath 须先经 joinUnderRoot 解析为以 root 为基的绝对路径。
+// 用途：absolutizeSkillReferences 的"防逃逸"守卫——相对引用经 `..` 逃出 skillDir 根（如 /skills/demo → /skills/etc）
+// 即视为越界，不改写。注意：单凭 joinUnderRoot===null 只能拦住逃出"文件系统根"的情形，拦不住逃到 root 的兄弟目录，故需此 containment 校验。
+function isUnderRoot(root: string, absPath: string): boolean {
+  const rootParts = splitParts(root);
+  const pathParts = splitParts(absPath);
+  if (pathParts.length < rootParts.length) return false;
+  for (let i = 0; i < rootParts.length; i++) {
+    if (pathParts[i] !== rootParts[i]) return false;
+  }
+  return true;
 }
 
 const MARKDOWN_REF_RE = /(\]\()([^)\s]+)(\))/g;
@@ -72,8 +90,10 @@ export function absolutizeSkillReferences(text: string, options: LocalPathRewrit
     if (trimmed.startsWith('#')) return match; // 锚点
     if (isAbsolutePath(trimmed)) return match; // 已是绝对路径
     if (trimmed.startsWith('~')) return match; // 家目录占位
-    // 越界校验：rel 会逃出 skillDir 根 → 不改写
-    if (joinUnderRoot(skillDir, trimmed) === null) return match;
+    // 越界校验：rel 经 `..` 会逃出 skillDir 根（不在 root 之内）→ 不改写（防逃逸）。
+    const candidateUnderSkill = joinUnderRoot(skillDir, trimmed);
+    if (candidateUnderSkill === null) return match;
+    if (!isUnderRoot(skillDir, candidateUnderSkill)) return match;
 
     const base1 = joinUnderRoot(thisFileDir, trimmed);
     if (base1 && fileExists(base1)) return `${open}${base1}${close}`;

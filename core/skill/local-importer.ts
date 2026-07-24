@@ -282,6 +282,10 @@ export async function relocateLocalSkillSource(
     ...loadedSkill.skill,
     remote: loadedSkill.skill.remote ? {
       ...loadedSkill.skill.remote,
+      // 重定位原地更新、保留原 source.id（见 updated 的构造）。新路径加载得到的
+      // remote.sourceId 是新 id，必须与保留的旧 id 对齐，否则 stageUpsert 的
+      // "remote 必须匹配 source" 断言（registry.ts:315）会拒绝落盘。
+      sourceId: updated.id,
       importedAt: loadedSkill.skill.remote.importedAt || now,
       updatedAt: now,
       lastCheckedAt: now,

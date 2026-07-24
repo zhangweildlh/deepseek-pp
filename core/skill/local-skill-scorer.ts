@@ -19,8 +19,10 @@ const ACTIVATION_THRESHOLD = 100;
 const MIN_LEAD_GAP = 50;
 
 function extractScenario(desc: string, labelRegex: RegExp): string {
+  // 标签后的冒号须同时兼容半角(:)与全角(：)，否则像「适用场景：生成周报」这类
+  // 用全角冒号的场景标注会被漏匹配（applicable/notApplicable 抽为空 → scenarioAdjustment 恒返 0）。
   const pattern = new RegExp(
-    labelRegex.source + String.raw`:\s*([\s\S]*?)(?=\n#{1,3}\s|\n[A-Za-z一-龥]{2,}[：:]|$)`,
+    labelRegex.source + String.raw`[：:]\s*([\s\S]*?)(?=\n#{1,3}\s|\n[A-Za-z一-龥]{2,}[：:]|$)`,
     'i',
   );
   const m = desc.match(pattern);

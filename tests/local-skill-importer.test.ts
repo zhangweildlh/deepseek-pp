@@ -236,7 +236,7 @@ describe('local Skill importer', () => {
     const imported = result.imported[0];
     expect(imported.instructions).toContain('Supporting files available on demand: 1');
     expect(imported.instructions).toContain('## Supporting Files Available on Demand');
-    expect(imported.instructions).toContain('Read them with Shell MCP when the upstream instructions need them.');
+    expect(imported.instructions).toContain('Read them with the local file tool when the upstream instructions need them.');
     expect(imported.instructions).toContain('- references/extended-guide.md (2048 bytes)');
     expect(imported.instructions).not.toContain('## Omitted Supporting Files');
   });

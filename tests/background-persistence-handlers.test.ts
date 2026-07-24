@@ -147,10 +147,10 @@ describe('R4.1 persistence runtime handler ownership', () => {
       localPreference: createLocalPreferenceDependencies(),
     });
     const types = handlers.map((handler) => handler.type);
-    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (57)');
+    const expected = readInventoryCommands('R4.1 / #360 — Persistence, library, and local preferences (61)');
 
-    expect(types).toHaveLength(57);
-    expect(new Set(types).size).toBe(57);
+    expect(types).toHaveLength(61);
+    expect(new Set(types).size).toBe(61);
     expect([...types].sort()).toEqual([...expected].sort());
     for (const type of types) expect(getRuntimeCommandOwner(type)).toBe('typed-handler');
     const decodedTypes = Object.entries(RUNTIME_COMMAND_CONTRACTS)
