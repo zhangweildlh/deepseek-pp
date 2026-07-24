@@ -26,7 +26,7 @@ function extractScenario(desc: string, labelRegex: RegExp): string {
     'i',
   );
   const m = desc.match(pattern);
-  return m ? m[1] : '';
+  return m ? m[2] : '';
 }
 
 function hits(text: string, queryNorm: string, queryTerms: string[]): boolean {
