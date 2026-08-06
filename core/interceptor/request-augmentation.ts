@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
 import { buildPromptAugmentation } from '../prompt';
 import {
@@ -357,7 +358,7 @@ function composeLocalSkillPrompt(skill: AugmentationSkill): string {
       fileExists: (abs) => knownAbs.has(abs),
     });
     if (!prompt.includes('## Local Execution Boundary')) {
-      prompt = `${prompt}\n\n---\n\n${buildLocalExecutionBoundary(skillDir)}`;
+      prompt = `${prompt}\n\n---\n\n${buildLocalExecutionBoundary(skillDir, basename(skill.remote?.path ?? 'SKILL.md'))}`;
     }
   }
   return prompt;
