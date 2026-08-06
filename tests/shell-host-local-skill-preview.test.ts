@@ -24,7 +24,7 @@ describe('shell native host local_skill_preview', () => {
 
     expect(response.error).toBeUndefined();
     const data = response.result?.structuredContent?.data;
-    expect(data?.skills).toHaveLength(2);
+    expect(data?.skills.filter((s: { kind: string }) => s.kind === 'dir')).toHaveLength(2);
 
     const rootSkill = data.skills.find((skill: { path: string }) => skill.path === 'SKILL.md');
     const nestedSkill = data.skills.find((skill: { path: string }) => skill.path === 'nested/SKILL.md');
@@ -43,7 +43,7 @@ describe('shell native host local_skill_preview', () => {
 
     expect(response.error).toBeUndefined();
     const data = response.result?.structuredContent?.data;
-    const skill = data.skills[0];
+    const skill = data.skills.find((s: { path: string }) => s.path === 'SKILL.md');
     expect(skill.includedFiles).toHaveLength(16);
     expect(skill.omittedFiles).toHaveLength(13);
     expect(skill.omittedFiles[0]).toMatchObject({ path: 'references/17.md' });

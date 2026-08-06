@@ -415,12 +415,14 @@ describe('local Skill importer', () => {
     expect(result.imported[0].name).toBe('ref-material-writing');
   });
 
-  it('falls back to a hash slug when only a non-ASCII name is available (issue #296)', async () => {
-    // No `name:` field, Chinese H1 title, Chinese directory — every source
-    // slug is non-ASCII. The importer must not throw; it derives a stable
-    // `skill-<hash>` slug so the user can rename it later.
+  it('rejects a local Skill with a missing ASCII name instead of silently slugifying (issue #296 / design S3 / R-NAME-REQUIRED)', async () => {
+    // Regression guard for issue #296: the OLD lenient parser derived a stable
+    // `skill-<hash>` slug when no ASCII `name` was available, silently importing
+    // the Skill. The Phase 4 strict frontmatter contract (skill-import-design-rules.md
+    // §四 / §八 Step 2.3, appendix A.2 default "报错阻断") REJECTS such documents and
+    // surfaces the violation in the preview — it must NOT import a slugified fallback.
     const content = ['---', 'description: 中文 only', '---', '', '# 参考材料写作', '', 'body'].join('\n');
-    vi.mocked(executeMcpToolCall).mockResolvedValueOnce({
+    vi.mocked(executeMcpToolCall).mockResolvedValue({
       ok: true,
       summary: 'MCP tool executed',
       output: {
@@ -448,14 +450,17 @@ describe('local Skill importer', () => {
       },
     });
 
-    const result = await importLocalSkillSource({
+    // The preview must surface the Skill as a validation failure (no silent slug import).
+    const preview = await previewLocalSkillSource('D:\\写作助手');
+    const skill = preview.skills.find((s: { path: string }) => s.path === 'SKILL.md');
+    expect(skill).toBeDefined();
+    expect(skill?.violations?.map((v: { ruleId: string }) => v.ruleId)).toContain('R-NAME-REQUIRED');
+
+    // Importing the rejected Skill must not silently slugify it into an import.
+    await expect(importLocalSkillSource({
       rootPath: 'D:\\写作助手',
       selectedPaths: ['SKILL.md'],
-    });
-    expectImportSuccess(result);
-
-    expect(result.imported).toHaveLength(1);
-    expect(result.imported[0].name).toMatch(/^skill-[a-z0-9]{2,8}$/);
+    })).rejects.toThrow();
   });
 
   describe('relocateLocalSkillSource', () => {
