@@ -831,7 +831,7 @@ function buildLocalImportedInstructions(input: {
     ...omittedFiles.map((file) => `- ${relativeToSkillDirectory(file.path, directory)} (${file.bytes} bytes)`),
   ].join('\n');
 
-  const executionBoundary = buildLocalExecutionBoundary(directoryPath);
+  const executionBoundary = buildLocalExecutionBoundary(directoryPath, basename(skillPath));
 
   return [header, scripts, omitted, executionBoundary].filter(Boolean).join('\n\n---\n\n');
 }
@@ -840,7 +840,7 @@ function buildLocalImportedInstructions(input: {
   // Both import and activation use this function, keeping path-resolution rules / initial cwd hint / escape prohibition consistent.
   // Note (Review #4 Route A): "cwd set to skillDir" means the initial hint that "session-start cwd is skillDir",
   // not a hard session-wide persistent binding; real-body relative references rely on the Agent following the "double-base rule" (Review #3 Route A).
-export function buildLocalExecutionBoundary(skillDir: string): string {
+export function buildLocalExecutionBoundary(skillDir: string, definitionFile = 'SKILL.md'): string {
   return [
     '## Local Execution Boundary',
     '',
@@ -851,7 +851,7 @@ export function buildLocalExecutionBoundary(skillDir: string): string {
     '- Use the double-base rule: first try relative to the referencing file, then relative to the Skill directory path.',
     '- Never use `..` to escape the Skill directory path.',
     '- Treat paths shown here as local user-machine paths. Do not expose or rewrite them unless the user asks.',
-    `- Before relying on this Skill, verify the definition file exists: run local_file_stat on \`${skillDir}/SKILL.md\`.`,
+    `- Before relying on this Skill, verify the definition file exists: run local_file_stat on \`${skillDir}/${definitionFile}\`.`,
     '- If the definition file is missing or moved, stop and tell the user the Skill definition file is unavailable; suggest using the Skill Update action to re-specify the path.',
   ].join('\n');
 }

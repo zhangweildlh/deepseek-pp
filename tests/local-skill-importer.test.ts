@@ -18,12 +18,14 @@ import { getAllMcpServers, getMcpToolCache, updateMcpServer } from '../core/mcp/
 import type { McpServerConfig, McpToolCacheEntry } from '../core/mcp/types';
 import {
   importLocalSkillSource as importLocalSkillSourceWithRuntime,
+  parseLocalSkillDoc,
   pickLocalSkillFolder as pickLocalSkillFolderWithRuntime,
   previewLocalSkillSource as previewLocalSkillSourceWithRuntime,
   relocateLocalSkillSource as relocateLocalSkillSourceWithRuntime,
   updateLocalSkillSource as updateLocalSkillSourceWithRuntime,
 } from '../core/skill/local-importer';
 import type { LocalSkillImportResponse, LocalSkillImportResult } from '../core/types';
+import type { ParseSkillDocResult } from '../core/skill/local-importer';
 import type { LocalStateMutationStage } from '../core/persistence/local-state-mutation';
 import type { ToolCall, ToolResult } from '../core/types';
 
@@ -461,6 +463,129 @@ describe('local Skill importer', () => {
       rootPath: 'D:\\写作助手',
       selectedPaths: ['SKILL.md'],
     })).rejects.toThrow();
+  });
+
+  describe('strict frontmatter contract (parseLocalSkillDoc)', () => {
+    // Pure-logic coverage for the six hard-reject rules + boundary cases.
+    // Every rule (R-FENCE / R-FIELD-INDENT / R-NAME-REQUIRED / R-DESC-REQUIRED /
+    // R-NAME-CHARSET) must be asserted directly; the lenient shared parser is NOT used.
+    const fm = (frontmatter: string, body = '# Body\n\nbody text'): string =>
+      [`---`, frontmatter, `---`, ``, body].join('\n');
+
+    const expectViolations = (result: ParseSkillDocResult, expected: string[]): void => {
+      expect('ok' in result).toBe(true);
+      if ('ok' in result) {
+        const ruleIds = result.violations.map((v) => v.ruleId);
+        for (const ruleId of expected) expect(ruleIds).toContain(ruleId);
+      }
+    };
+
+    const expectSuccess = (result: ParseSkillDocResult, name: string, description?: string): void => {
+      expect('ok' in result).toBe(false);
+      if (!('ok' in result)) {
+        expect(result.name).toBe(name);
+        if (description !== undefined) expect(result.description).toBe(description);
+      }
+    };
+
+    it('R-FENCE: rejects when the opening fence is missing', () => {
+      expectViolations(parseLocalSkillDoc('name: x\ndescription: y\n\n# Body', 'SKILL.md'), ['R-FENCE']);
+    });
+
+    it('R-FENCE: rejects when the closing fence is missing', () => {
+      expectViolations(parseLocalSkillDoc(['---', 'name: x', 'description: y'].join('\n'), 'SKILL.md'), ['R-FENCE']);
+    });
+
+    it('R-FENCE: rejects an indented (non-standalone) opening fence', () => {
+      expectViolations(
+        parseLocalSkillDoc(['  ---', 'name: x', 'description: y', '---'].join('\n'), 'SKILL.md'),
+        ['R-FENCE'],
+      );
+    });
+
+    it('R-FIELD-INDENT: rejects a leading-space field inside frontmatter', () => {
+      expectViolations(parseLocalSkillDoc(fm('  name: my-skill\ndescription: test'), 'SKILL.md'), ['R-FIELD-INDENT']);
+    });
+
+    it('R-NAME-REQUIRED: rejects a document without a name field', () => {
+      expectViolations(parseLocalSkillDoc(fm('description: test'), 'SKILL.md'), ['R-NAME-REQUIRED']);
+    });
+
+    it('R-DESC-REQUIRED: rejects a document without a description field', () => {
+      expectViolations(parseLocalSkillDoc(fm('name: my-skill'), 'SKILL.md'), ['R-DESC-REQUIRED']);
+    });
+
+    it('R-NAME-CHARSET: rejects a non-ASCII (Chinese) name', () => {
+      expectViolations(parseLocalSkillDoc(fm('name: 参考材料\ndescription: test'), 'SKILL.md'), ['R-NAME-CHARSET']);
+    });
+
+    it('R-NAME-REQUIRED: rejects an empty name value', () => {
+      expectViolations(parseLocalSkillDoc(fm('name:\ndescription: test'), 'SKILL.md'), ['R-NAME-REQUIRED']);
+    });
+
+    it('accepts a valid directory-type document and normalizes the name', () => {
+      expectSuccess(parseLocalSkillDoc(fm('name: My_Skill\ndescription: test'), 'SKILL.md'), 'my-skill', 'test');
+    });
+
+    it('L2 regression: trims surrounding whitespace before the charset gate (no false R-NAME-CHARSET)', () => {
+      expectSuccess(parseLocalSkillDoc(fm('name: my-skill \ndescription: test'), 'SKILL.md'), 'my-skill');
+    });
+
+    it('tolerates a leading UTF-8 BOM on the frontmatter fence', () => {
+      expectSuccess(parseLocalSkillDoc('\uFEFF' + fm('name: my-skill\ndescription: test'), 'SKILL.md'), 'my-skill');
+    });
+  });
+
+  it('imports a single-file Skill (kind: file) with empty resources and a basename instruction', async () => {
+    // Single-file-type Skill: discovered as a bare .md (not SKILL.md), carries no
+    // bundled resources, and the import instructions reference the real file name.
+    const singleContent = ['---', 'name: standalone', 'description: A standalone skill', '---', '', '# Standalone', '', 'body'].join('\n');
+    vi.mocked(executeMcpToolCall).mockResolvedValue({
+      ok: true,
+      summary: 'MCP tool executed',
+      output: {
+        ok: true,
+        data: {
+          rootPath: 'D:\\standalone',
+          displayName: 'standalone',
+          directoryName: 'standalone',
+          warnings: [],
+          truncated: false,
+          skills: [
+            {
+              path: 'Standalone.md',
+              directory: '',
+              directoryPath: 'D:\\standalone',
+              content: singleContent,
+              bodyBytes: singleContent.length,
+              includedFiles: [],
+              omittedFiles: [],
+              scriptFiles: [],
+              warnings: [],
+            },
+          ],
+        },
+      },
+    });
+
+    const preview = await previewLocalSkillSource('D:\\standalone');
+    const skill = preview.skills.find((s: { path: string }) => s.path === 'Standalone.md');
+    expect(skill).toBeDefined();
+    expect(skill?.kind).toBe('file');
+    expect(skill?.includedFiles).toEqual([]);
+    expect(skill?.violations).toBeUndefined();
+
+    const result = await importLocalSkillSource({
+      rootPath: 'D:\\standalone',
+      selectedPaths: ['Standalone.md'],
+    });
+    expectImportSuccess(result);
+    expect(result.imported).toHaveLength(1);
+    const imported = result.imported[0]!;
+    expect(imported.name).toBe('standalone');
+    expect(imported.remote!.includedFiles).toEqual([]);
+    expect(imported.instructions).toContain('standalone/Standalone.md');
+    expect(imported.instructions).not.toContain('standalone/SKILL.md');
   });
 
   describe('relocateLocalSkillSource', () => {
