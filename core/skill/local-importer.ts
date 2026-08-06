@@ -939,13 +939,16 @@ export function parseLocalSkillDoc(raw: string, path: string): ParseSkillDocResu
   const descRaw = readString(meta, 'description');
   if (nameRaw === undefined) violations.push({ ruleId: 'R-NAME-REQUIRED', message: 'The name field is required.' });
   if (descRaw === undefined) violations.push({ ruleId: 'R-DESC-REQUIRED', message: 'The description field is required.' });
-  if (nameRaw !== undefined && !/^[A-Za-z0-9_-]+$/.test(nameRaw)) {
+  // Trim before the charset gate so a name with only surrounding whitespace (e.g. `my-skill `)
+  // is normalized consistently with normalizeSkillName instead of being rejected by R-NAME-CHARSET.
+  const nameTrimmed = nameRaw?.trim();
+  if (nameTrimmed !== undefined && !/^[A-Za-z0-9_-]+$/.test(nameTrimmed)) {
     violations.push({ ruleId: 'R-NAME-CHARSET', message: 'The name field may only contain ASCII letters, digits, hyphen, and underscore; Chinese or other non-ASCII characters are not allowed.' });
   }
   if (violations.length > 0) return fail(path, violations); // hard reject, no fallback
 
   const body = lines.slice(fenceEnd + 1).join('\n').trim();
-  const name = normalizeSkillName(nameRaw!); // 2.4 normalize: _->-, lowercase, collapse, trim
+  const name = normalizeSkillName(nameTrimmed!); // 2.4 normalize: _->-, lowercase, collapse, trim
   const description = descRaw!;
   const metadata = readObject(meta, 'metadata');
   const version = readString(metadata, 'version') ?? readString(meta, 'version');

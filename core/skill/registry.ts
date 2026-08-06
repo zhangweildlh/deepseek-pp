@@ -359,15 +359,18 @@ async function stageUpsertImportedSkillSourceAlreadyLocked(
     // Defensive kind default: legacy/local records may omit `kind`, so infer it from the
     // definition-file path to keep consumers (UI label, index-card path derivation) free of
     // `undefined`. Rule matches the C1 data contract: path ending in 'SKILL.md' => 'dir',
-    // otherwise 'file'. Materialized into metadata so it survives the codec round-trip.
-    const kind = inferLocalSkillKind(skill.remote?.path ?? '');
+    // otherwise 'file'. Only meaningful for local Skills — github/pi Skills have no SKILL.md
+    // on disk, so skip the inference to avoid polluting their metadata with a misleading `kind`.
+    const kind = skill.remote?.provider === 'local'
+      ? inferLocalSkillKind(skill.remote?.path ?? '')
+      : undefined;
     return {
       ...existing,
       ...skill,
       name,
       source: 'remote' as const,
       enabled: existing?.enabled ?? skill.enabled ?? true,
-      metadata: { ...skill.metadata, kind },
+      metadata: { ...skill.metadata, ...(kind ? { kind } : {}) },
       ...(skill.remote
         ? { remote: { ...existing?.remote, ...skill.remote } }
         : {}),
