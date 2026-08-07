@@ -3,7 +3,6 @@ import {
   createBrowserDownloadManager,
   type BrowserDownloadManager,
 } from '../download-manager';
-import { WRITE_MARKDOWN_TO_DIR } from '../../../core/export/markdown-direct-save';
 
 export interface ContentUxPolishController {
   stop(): void;
@@ -205,7 +204,7 @@ function mountMessageActions(
     const path = `${dir}/${fileName}`;
     const markdownText = getMessageText(message);
     saveDirButton.disabled = true;
-    void chrome.runtime.sendMessage({ type: WRITE_MARKDOWN_TO_DIR, markdown: markdownText, path })
+    void chrome.runtime.sendMessage({ type: 'WRITE_MARKDOWN_TO_DIR', markdown: markdownText, path })
       .then((response: { ok?: boolean } | undefined) => {
         if (response && response.ok) {
           void chrome.storage.local.set({ [LAST_MD_DIR_STORAGE_KEY]: targetDir });
