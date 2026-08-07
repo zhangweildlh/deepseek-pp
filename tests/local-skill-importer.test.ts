@@ -539,34 +539,7 @@ describe('local Skill importer', () => {
   it('imports a single-file Skill (kind: file) with empty resources and a basename instruction', async () => {
     // Single-file-type Skill: discovered as a bare .md (not SKILL.md), carries no
     // bundled resources, and the import instructions reference the real file name.
-    const singleContent = ['---', 'name: standalone', 'description: A standalone skill', '---', '', '# Standalone', '', 'body'].join('\n');
-    vi.mocked(executeMcpToolCall).mockResolvedValue({
-      ok: true,
-      summary: 'MCP tool executed',
-      output: {
-        ok: true,
-        data: {
-          rootPath: 'D:\\standalone',
-          displayName: 'standalone',
-          directoryName: 'standalone',
-          warnings: [],
-          truncated: false,
-          skills: [
-            {
-              path: 'Standalone.md',
-              directory: '',
-              directoryPath: 'D:\\standalone',
-              content: singleContent,
-              bodyBytes: singleContent.length,
-              includedFiles: [],
-              omittedFiles: [],
-              scriptFiles: [],
-              warnings: [],
-            },
-          ],
-        },
-      },
-    });
+    vi.mocked(executeMcpToolCall).mockResolvedValue(createStandaloneLocalSkillToolResult());
 
     const preview = await previewLocalSkillSource('D:\\standalone');
     const skill = preview.skills.find((s: { path: string }) => s.path === 'Standalone.md');
@@ -684,6 +657,30 @@ describe('local Skill importer', () => {
       await expect(updateLocalSkillSource('local:does-not-exist'))
         .rejects.toThrow('Local Skill source was not found');
     });
+
+    it('re-imports a single-file Skill (kind: file) on update and references the real definition file name', async () => {
+      // 更新路径复用 importLocalSkillSource，因此同样受益 PR #550 的 basename 去硬编码修复：
+      // 单文件型 Skill 在「更新」重扫后，指令应引用真实定义文件名 standalone/Standalone.md，
+      // 而非硬编码 SKILL.md。
+      vi.mocked(executeMcpToolCall).mockResolvedValue(createStandaloneLocalSkillToolResult());
+
+      const imported = await importLocalSkillSource({
+        rootPath: 'D:\\standalone',
+        selectedPaths: ['Standalone.md'],
+      });
+      expectImportSuccess(imported);
+      const originalId = imported.source.id;
+      expect(originalId).toBe('local:D:\\standalone');
+
+      // 更新路径：复用 importLocalSkillSource 重新扫描原 rootPath + skillPaths。
+      const updated = await updateLocalSkillSource(originalId);
+      expectImportSuccess(updated);
+      const updatedSkill = updated.imported[0]!;
+      expect(updatedSkill.name).toBe('standalone');
+      expect(updatedSkill.remote!.includedFiles).toEqual([]);
+      expect(updatedSkill.instructions).toContain('standalone/Standalone.md');
+      expect(updatedSkill.instructions).not.toContain('standalone/SKILL.md');
+    });
   });
 });
 
@@ -794,6 +791,37 @@ function createLocalSkillToolResultAt(rootPath: string) {
           directoryPath: rootPath,
           content: skill.content,
         }],
+      },
+    },
+  };
+}
+
+function createStandaloneLocalSkillToolResult() {
+  const content = ['---', 'name: standalone', 'description: A standalone skill', '---', '', '# Standalone', '', 'body'].join('\n');
+  return {
+    ok: true,
+    summary: 'MCP tool executed',
+    output: {
+      ok: true,
+      data: {
+        rootPath: 'D:\\standalone',
+        displayName: 'standalone',
+        directoryName: 'standalone',
+        warnings: [],
+        truncated: false,
+        skills: [
+          {
+            path: 'Standalone.md',
+            directory: '',
+            directoryPath: 'D:\\standalone',
+            content,
+            bodyBytes: content.length,
+            includedFiles: [],
+            omittedFiles: [],
+            scriptFiles: [],
+            warnings: [],
+          },
+        ],
       },
     },
   };
