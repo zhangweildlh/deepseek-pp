@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  body { margin: 12px; background: #f1f5f9; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .dpp-export-menu {
+    position: static;
+    z-index: 2147483647;
+    min-width: 320px;
+    width: 360px;
+    box-sizing: border-box;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.18);
+    color: #111827;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .dpp-export-menu form { margin: 0; }
+  .dpp-export-menu .dpp-export-menu-title { margin: 0 0 8px; color: #475569; font-size: 12px; font-weight: 600; }
+  .dpp-export-menu .dpp-export-menu-option { display: flex; align-items: center; gap: 8px; min-height: 30px; border-radius: 7px; padding: 4px 6px; cursor: pointer; user-select: none; }
+  .dpp-export-menu .dpp-export-menu-option:hover { background: rgba(77, 107, 254, 0.08); }
+  .dpp-export-menu input { width: 14px; height: 14px; margin: 0; accent-color: #4d6bfe; }
+  .dpp-export-menu .dpp-export-menu-dir-row { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px; }
+  .dpp-export-menu .dpp-export-menu-dir-row input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(128, 128, 128, 0.35); background: #fff; color: #1f2330; font-size: 12px; }
+  .dpp-export-menu .dpp-export-menu-hint { font-size: 11px; line-height: 1.4; opacity: 0.7; margin: 2px 0 4px; }
+  .dpp-export-menu .dpp-export-menu-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(15, 23, 42, 0.08); }
+  .dpp-export-menu button { min-width: 48px; height: 28px; border: 0; border-radius: 7px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .dpp-export-menu button[type="button"] { background: transparent; color: #64748b; }
+  .dpp-export-menu button[type="submit"] { background: #4d6bfe; color: #ffffff; }
+  .dpp-export-menu button:disabled { cursor: default; opacity: 0.55; }
+</style>
+</head>
+<body>
+  <div class="dpp-export-menu" role="dialog" aria-label="选择导出格式">
+    <form>
+      <div class="dpp-export-menu-title">导出格式</div>
+      <label class="dpp-export-menu-option"><input type="checkbox" name="format" value="html" /> HTML</label>
+      <label class="dpp-export-menu-option"><input type="checkbox" name="format" value="markdown" checked /> Markdown</label>
+      <label class="dpp-export-menu-option"><input type="checkbox" name="format" value="pdf" /> PDF</label>
+      <label class="dpp-export-menu-option"><input type="checkbox" name="format" value="imageManifest" /> 图片清单</label>
+
+      <div class="dpp-export-menu-title">内容范围</div>
+      <label class="dpp-export-menu-option"><input type="radio" name="contentScope" value="full" checked /> 全部内容（含工具调用、续跑、思考、注入信息）</label>
+      <label class="dpp-export-menu-option"><input type="radio" name="contentScope" value="input-output" /> 仅输入 + 最终产出</label>
+
+      <div class="dpp-export-menu-title">保存位置</div>
+      <label class="dpp-export-menu-option"><input type="radio" name="exportDestination" value="browser" /> 浏览器下载（默认）</label>
+      <label class="dpp-export-menu-option"><input type="radio" name="exportDestination" value="localDir" checked /> 本地目录（Native Host）</label>
+
+      <div class="dpp-export-menu-dir-row">
+        <input type="text" name="localDirPath" placeholder="目录路径，例如 /Users/you/notes" value="/Users/zhangwei/DeepSeek导出" />
+        <label class="dpp-export-menu-option"><input type="checkbox" name="rememberLocalDir" checked /> 记住此目录</label>
+      </div>
+      <div class="dpp-export-menu-hint">需要 Shell Local（Native Host）。不可用时回退为浏览器下载。</div>
+
+      <div class="dpp-export-menu-actions">
+        <button type="button">取消</button>
+        <button type="submit">导出</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
