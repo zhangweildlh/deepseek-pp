@@ -8,7 +8,7 @@ import type { ParseSkillDocResult } from '../core/skill/local-importer';
 // rule) and asserts the precise contract; a failing assertion is evidence of a
 // real bug at the cited source line.
 
-function isFail(r: ParseSkillDocResult): boolean {
+function isFail(r: ParseSkillDocResult): r is { ok: false; fileName: string; violations: Array<{ ruleId: string; message: string }> } {
   return 'ok' in r;
 }
 function ruleIds(r: ParseSkillDocResult): string[] {
