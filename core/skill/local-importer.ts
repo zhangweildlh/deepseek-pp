@@ -924,11 +924,15 @@ export function parseLocalSkillDoc(raw: string, path: string): ParseSkillDocResu
   const meta = parseYamlSubset(lines.slice(fenceStart + 1, fenceEnd).join('\n'));
   const violations: Array<{ ruleId: string; message: string }> = [];
 
-  // 2.2 Indented-field detection: a leading-space key inside frontmatter means
-  // name/description is not left-aligned; report precisely instead of a vague REQUIRED.
+  // 2.2 Indented-field detection: the `name` / `description` fields must be
+  // left-aligned (column 0). A leading-space `name:` / `description:` key means
+  // the required field is not left-aligned. Legitimately-nested block children
+  // (e.g. `metadata:` -> `version:` / `last_updated:`) are NOT violations — only
+  // the `name` / `description` keys themselves. See T1f (metadata block must
+  // succeed) and T1i (indented name/description must still be rejected).
   const fmBodyLines = lines.slice(fenceStart + 1, fenceEnd);
   for (const fmLine of fmBodyLines) {
-    if (/^\s+[A-Za-z0-9_-]+:/.test(fmLine)) {
+    if (/^\s+(name|description):/.test(fmLine)) {
       violations.push({ ruleId: 'R-FIELD-INDENT', message: 'Fields name / description must be left-aligned inline, with no leading space or other characters.' });
       break; // one occurrence is enough to flag; avoid duplicate noise
     }
