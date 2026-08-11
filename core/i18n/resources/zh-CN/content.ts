@@ -21,6 +21,13 @@ export const content = {
     cancelled: '导出已取消',
     partialSuccess: '导出完成，但部分会话读取失败，请检查导出文件中的 Export Warnings。',
     success: '当前对话已导出。',
+    destinationLabel: '保存位置',
+    destinationBrowser: '浏览器下载（默认）',
+    destinationLocalDir: '本地目录（Native Host）',
+    saveDirPlaceholder: '目录路径，例如 /Users/you/notes',
+    saveDirRemember: '记住此目录',
+    saveDirHint: '需要 Shell Local（Native Host）。不可用时回退为浏览器下载。',
+    localDirFallback: '本地目录不可用，已改用浏览器下载保存。',
   },
   historyOrganizer: {
     enhancedSearchTitle: 'DeepSeek++ 搜索增强',

@@ -368,6 +368,47 @@ const CONVERSATION_EXPORT_SCOPE_OPTIONS: ConversationExportScopeOption[] = [
   { scope: "input-output", labelKey: "content.export.scopeInputOutput" },
 ];
 
+type ConversationExportDestination = "browser" | "localDir";
+
+interface ConversationExportDestinationOption {
+  destination: ConversationExportDestination;
+  labelKey: LocaleMessageKey;
+}
+
+const CONVERSATION_EXPORT_DESTINATION_OPTIONS: ConversationExportDestinationOption[] = [
+  { destination: "browser", labelKey: "content.export.destinationBrowser" },
+  { destination: "localDir", labelKey: "content.export.destinationLocalDir" },
+];
+
+const CONVERSATION_EXPORT_LOCAL_DIR_STORAGE_KEY = "dpp:export:last-local-dir";
+
+function getStoredLocalExportDir(): string {
+  return localStorage.getItem(CONVERSATION_EXPORT_LOCAL_DIR_STORAGE_KEY) ?? "";
+}
+
+function storeLocalExportDir(dir: string): void {
+  if (dir) localStorage.setItem(CONVERSATION_EXPORT_LOCAL_DIR_STORAGE_KEY, dir);
+}
+
+function getSelectedConversationExportDestination(
+  menu: HTMLElement,
+): ConversationExportDestination {
+  const checked = menu.querySelector<HTMLInputElement>(
+    'input[name="exportDestination"]:checked',
+  );
+  return checked?.value === "localDir" ? "localDir" : "browser";
+}
+
+function getConversationExportLocalDir(menu: HTMLElement): string {
+  const input = menu.querySelector<HTMLInputElement>('input[name="localDirPath"]');
+  return input?.value.trim() ?? "";
+}
+
+function getConversationExportRememberDir(menu: HTMLElement): boolean {
+  const input = menu.querySelector<HTMLInputElement>('input[name="rememberLocalDir"]');
+  return input?.checked ?? false;
+}
+
 const CONVERSATION_EXPORT_SCOPE_STORAGE_KEY = "dpp:export:content-scope";
 
 function getStoredConversationExportScope(): ConversationExportContentScope {
@@ -2623,6 +2664,52 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     form.appendChild(label);
   }
 
+  const destTitle = document.createElement("div");
+  destTitle.className = "dpp-export-menu-title";
+  destTitle.textContent = contentT("content.export.destinationLabel");
+  form.appendChild(destTitle);
+
+  const initialLocalDir = getStoredLocalExportDir();
+  for (const option of CONVERSATION_EXPORT_DESTINATION_OPTIONS) {
+    const label = document.createElement("label");
+    label.className = "dpp-export-menu-option";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "exportDestination";
+    input.value = option.destination;
+    input.checked = option.destination === "browser";
+    const text = document.createElement("span");
+    text.textContent = contentT(option.labelKey);
+    label.append(input, text);
+    form.appendChild(label);
+  }
+
+  const dirRow = document.createElement("div");
+  dirRow.className = "dpp-export-menu-dir-row";
+  dirRow.hidden = true;
+  const dirInput = document.createElement("input");
+  dirInput.type = "text";
+  dirInput.name = "localDirPath";
+  dirInput.placeholder = contentT("content.export.saveDirPlaceholder");
+  dirInput.value = initialLocalDir;
+  const rememberLabel = document.createElement("label");
+  rememberLabel.className = "dpp-export-menu-option";
+  const rememberInput = document.createElement("input");
+  rememberInput.type = "checkbox";
+  rememberInput.name = "rememberLocalDir";
+  rememberInput.checked = initialLocalDir.length > 0;
+  const rememberText = document.createElement("span");
+  rememberText.textContent = contentT("content.export.saveDirRemember");
+  rememberLabel.append(rememberInput, rememberText);
+  dirRow.append(dirInput, rememberLabel);
+  form.appendChild(dirRow);
+
+  const dirHint = document.createElement("div");
+  dirHint.className = "dpp-export-menu-hint";
+  dirHint.textContent = contentT("content.export.saveDirHint");
+  dirHint.hidden = true;
+  form.appendChild(dirHint);
+
   const actions = document.createElement("div");
   actions.className = "dpp-export-menu-actions";
   const cancel = document.createElement("button");
@@ -2636,6 +2723,9 @@ function showConversationExportMenu(button: HTMLButtonElement) {
   form.appendChild(actions);
 
   form.addEventListener("change", () => {
+    const useLocalDir = getSelectedConversationExportDestination(menu) === "localDir";
+    dirRow.hidden = !useLocalDir;
+    dirHint.hidden = !useLocalDir;
     submit.disabled = getSelectedConversationExportFormats(menu).length === 0;
   });
   form.addEventListener("submit", (event) => {
@@ -2644,8 +2734,13 @@ function showConversationExportMenu(button: HTMLButtonElement) {
     if (formats.length === 0) return;
     const scope = getSelectedConversationExportScope(menu);
     storeConversationExportScope(scope);
+    const destination = getSelectedConversationExportDestination(menu);
+    const targetDir = destination === "localDir" ? getConversationExportLocalDir(menu) : undefined;
+    if (destination === "localDir" && targetDir && getConversationExportRememberDir(menu)) {
+      storeLocalExportDir(targetDir);
+    }
     closeConversationExportMenu();
-    void startCurrentConversationExport(formats, scope);
+    void startCurrentConversationExport(formats, scope, destination, targetDir);
   });
 
   menu.appendChild(form);
@@ -2750,6 +2845,8 @@ function handleConversationExportMenuKeydown(event: KeyboardEvent) {
 async function startCurrentConversationExport(
   selectedFormats: ConversationExportArtifact["format"][] = ["html"],
   contentScope: ConversationExportContentScope = "full",
+  destination: ConversationExportDestination = "browser",
+  targetDir?: string,
 ) {
   if (activeConversationExportId) return;
   const sessionId = getCurrentChatSessionId();
@@ -2784,7 +2881,7 @@ async function startCurrentConversationExport(
     if (artifacts.length !== formats.length) {
       throw new Error(contentT("content.export.failed"));
     }
-    downloadConversationExportArtifacts(artifacts);
+    downloadConversationExportArtifacts(artifacts, destination, targetDir);
 
     const warning = response.summary.failedSessionCount > 0;
     showConversationExportToast(
@@ -3854,12 +3951,40 @@ function injectMultimodalMediaStyles() {
   document.head.appendChild(style);
 }
 
-function downloadConversationExportArtifacts(
+async function downloadConversationExportArtifacts(
   artifacts: readonly ConversationExportArtifact[],
+  destination: ConversationExportDestination = "browser",
+  targetDir?: string,
 ) {
   const manager = exportDownloadManager;
   if (!manager || artifacts.length === 0)
     throw new Error(contentT("content.export.failed"));
+
+  const markdownArtifact = artifacts.find((artifact) => artifact.format === "markdown");
+  const canWriteLocalDir =
+    destination === "localDir" && Boolean(targetDir) && Boolean(markdownArtifact);
+
+  if (canWriteLocalDir) {
+    const result = await requestWriteMarkdownToDir(
+      markdownArtifact!.content,
+      joinLocalDirPath(targetDir!, markdownArtifact!.filename),
+    );
+    if (result.ok) {
+      const rest = artifacts.filter((artifact) => artifact !== markdownArtifact);
+      if (rest.length === 1) {
+        const only = rest[0];
+        manager.download(only.filename, new Blob([only.content], { type: only.mimeType }));
+      } else if (rest.length > 1) {
+        const archive = createConversationExportArchiveArtifact(rest);
+        const archiveBytes = new Uint8Array(archive.content.byteLength);
+        archiveBytes.set(archive.content);
+        manager.download(archive.filename, new Blob([archiveBytes], { type: archive.mimeType }));
+      }
+      return;
+    }
+    showConversationExportToast(contentT("content.export.localDirFallback"), "warning");
+  }
+
   if (artifacts.length === 1) {
     const artifact = artifacts[0];
     manager.download(
@@ -3876,6 +4001,43 @@ function downloadConversationExportArtifacts(
     archive.filename,
     new Blob([archiveBytes], { type: archive.mimeType }),
   );
+}
+
+function joinLocalDirPath(dir: string, fileName: string): string {
+  const normalized = dir.replace(/[\\/]+$/, "");
+  return `${normalized}/${fileName}`;
+}
+
+interface WriteMarkdownToDirResponse {
+  method: "native-host" | "download";
+  ok: boolean;
+  error?: string;
+}
+
+// Emit the frozen content command WRITE_MARKDOWN_TO_DIR to the background, which
+// bridges to the Shell Local (Native Host) local_file_write chunked writer.
+// The string literal type is required so the runtime-boundary test can extract
+// it from the content producers set.
+async function requestWriteMarkdownToDir(
+  markdown: string,
+  path: string,
+): Promise<WriteMarkdownToDirResponse> {
+  try {
+    const response = (await chrome.runtime.sendMessage({
+      type: "WRITE_MARKDOWN_TO_DIR",
+      payload: { markdown, path },
+    })) as WriteMarkdownToDirResponse | undefined;
+    if (response && typeof response === "object" && "ok" in response) {
+      return response;
+    }
+    return { method: "download", ok: false, error: "invalid_response" };
+  } catch (error) {
+    return {
+      method: "download",
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function showConversationExportToast(
@@ -4069,6 +4231,28 @@ function injectConversationExportActionStyles() {
       height: 14px;
       margin: 0;
       accent-color: #4d6bfe;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-dir-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 6px 0 2px;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-dir-row input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--dpp-ui-border, rgba(128, 128, 128, 0.35));
+      background: var(--dpp-ui-surface, #fff);
+      color: var(--dpp-ui-text, #1f2330);
+      font-size: 12px;
+    }
+    .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-hint {
+      font-size: 11px;
+      line-height: 1.4;
+      opacity: 0.7;
+      margin: 2px 0 4px;
     }
     .${EXPORT_ACTION_MENU_CLASS} .dpp-export-menu-actions {
       display: flex;

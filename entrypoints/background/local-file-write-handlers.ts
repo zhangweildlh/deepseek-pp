@@ -1,6 +1,6 @@
 // Background handler for the "save markdown to local directory" feature.
 //
-// The content script (ux-polish.ts) sends WRITE_MARKDOWN_TO_DIR with the raw
+// The content script (entrypoints/content.ts export menu) sends WRITE_MARKDOWN_TO_DIR with the raw
 // markdown and an absolute target path. Here, in the background, we resolve the
 // Shell Native Host MCP server + its native-messaging transport + the
 // local_file_write descriptor (the exact `server`/`transport`/`descriptor`

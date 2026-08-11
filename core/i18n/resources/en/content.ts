@@ -21,6 +21,13 @@ export const content = {
     cancelled: 'Export cancelled',
     partialSuccess: 'Export completed, but some sessions could not be read. Check Export Warnings in the exported file.',
     success: 'Current conversation exported.',
+    destinationLabel: 'Save destination',
+    destinationBrowser: 'Browser download (default)',
+    destinationLocalDir: 'Local directory (Native Host)',
+    saveDirPlaceholder: 'Directory path, e.g. /Users/you/notes',
+    saveDirRemember: 'Remember this directory',
+    saveDirHint: 'Needs Shell Local (Native Host). Falls back to browser download when unavailable.',
+    localDirFallback: 'Local directory unavailable, saved via browser download instead.',
   },
   historyOrganizer: {
     enhancedSearchTitle: 'DeepSeek++ search enhancements',

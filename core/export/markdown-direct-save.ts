@@ -20,7 +20,8 @@ import type {
 import type { ToolCall } from '../tool/types';
 import { readOptionalChromeApi } from '../platform/chrome-api';
 
-// Runtime message type sent by the content UI (ux-polish.ts) and handled by
+// Runtime message type sent by the content UI (entrypoints/content.ts export
+// menu "Local directory" destination) and handled by
 // entrypoints/background/local-file-write-handlers.ts.
 export const WRITE_MARKDOWN_TO_DIR = 'WRITE_MARKDOWN_TO_DIR';
 
