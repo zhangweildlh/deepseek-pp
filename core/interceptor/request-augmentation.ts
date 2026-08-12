@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename } from '../skill/path-browser';
 import { DEFAULT_LOCALE, translate, type SupportedLocale } from '../i18n';
 import { buildPromptAugmentation } from '../prompt';
 import {

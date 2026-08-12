@@ -16,7 +16,7 @@ import type { McpServerConfig } from '../mcp/types';
 import type { LocalStateMutationRunner } from '../persistence/local-state-mutation';
 import type { JsonValue, ToolResult } from '../tool/types';
 import type { ToolCall } from '../tool/types';
-import { basename } from 'node:path';
+import { basename } from './path-browser';
 import {
   getAllSkillSources,
   getSkillCollisionCandidates,
