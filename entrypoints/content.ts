@@ -2865,6 +2865,17 @@ async function startCurrentConversationExport(
   showConversationExportToast(contentT("content.export.progress"), "info");
 
   try {
+    // Warm the DeepSeek client-headers cache before requesting the export.
+    // The background export handler requires these headers, but they are only
+    // captured lazily on the first chat-completion request. A user who opens an
+    // existing conversation and exports without sending a new message would
+    // otherwise hit a false "please sign in" error. Persisting here falls back
+    // to reading the token from localStorage, so any logged-in session keeps
+    // the cache warm without depending on the background auth-refresh round-trip.
+    await persistDeepSeekClientHeaders().catch((error) => {
+      console.warn("[DeepSeek++] pre-export client header refresh failed", error);
+    });
+
     const response = await sendConversationExportRequest(
       exportId,
       sessionId,
