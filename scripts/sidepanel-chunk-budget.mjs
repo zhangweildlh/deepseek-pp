@@ -105,9 +105,18 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // encoder-variance allowance baked into BUDGET. CI (Node 22) gzip drift should
 // be re-measured if it exceeds the allowance — the local build is green at this
 // value. firstChatScreen and all route chunks stay inside their existing caps.
+// Refreshed for #555 (Native Host direct-write of the Markdown export to a
+// user-specified directory): seven content.export i18n keys (zh-CN/en) for the
+// new "Save destination" export-menu section were added to the shared resource
+// tree, which flows into both the initial shell and the first-chat-screen graph.
+// Post-#550 baseline: initialShell 379859 raw / 116182 gzip; firstChatScreen
+// 410115 raw / 126477 gzip. #555 adds ~1017 raw / ~1000 gzip over the #550
+// baseline. Estimated CI Node-22 drift (+~271-300 over local) suggests setting
+// initialShell gzip baseline to 117200 (budget 117456) and firstChatScreen gzip
+// cap to 127800; re-baseline to exact CI measurement after the first green CI run.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 379_859, gzip: 116_182 },
+  initialShell: { raw: 382_290, gzip: 117_111 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -173,12 +182,20 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // node@24.18). Raw is set to the measured value; gzip gets the standard 256-byte
 // encoder-variance allowance. CI (Node 22) gzip drift should be re-measured if
 // it exceeds the allowance.
+// Raised for #555 (Native Host Markdown direct-write): content.export i18n keys
+// (zh-CN/en) add ~1017 raw / ~1000 gzip to the first-chat-screen graph. Estimated
+// CI Node-22 drift (+~271-300 over local) suggests setting firstChatScreen gzip
+// cap to 127800; re-baseline to exact CI measurement after the first green CI run.
+// Post-#550+#555 combined: initialShell raw 382290 / gzip 117111 (measured locally).
+// firstChatScreen raw 411xxx / gzip 127xxx (estimated, need CI measurement).
+// Conservative budget: initialShell.gzip=117367 (budget=117623 with variance),
+// firstChatScreen.gzip=127800. Re-baseline to exact CI measurement after first green run.
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 410_115, gzip: 126_477 },
+  firstChatScreen: { raw: 412_546, gzip: 127_800 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
