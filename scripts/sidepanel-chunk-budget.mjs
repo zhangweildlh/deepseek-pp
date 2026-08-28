@@ -116,7 +116,7 @@ if (requestedBrowsers.some((browser) => !browser)) {
 // cap to 127800; re-baseline to exact CI measurement after the first green CI run.
 // The initial shell is sidepanel.html's entry script plus every static modulepreload.
 const BASELINE = Object.freeze({
-  initialShell: { raw: 379_859, gzip: 116_182 },
+  initialShell: { raw: 382_290, gzip: 117_111 },
   routeChunks: {
     ChatPage: { raw: 134_938, gzip: 40_056 },
     CapabilitiesPage: { raw: 160_137, gzip: 35_259 },
@@ -186,15 +186,16 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // (zh-CN/en) add ~1017 raw / ~1000 gzip to the first-chat-screen graph. Estimated
 // CI Node-22 drift (+~271-300 over local) suggests setting firstChatScreen gzip
 // cap to 127800; re-baseline to exact CI measurement after the first green CI run.
-// Combined with #550: initialShell raw 379859 (+1567 from #550, +1017 from #555 = +2584 total);
-// firstChatScreen raw 410115 (+1567 from #550) + ~1017 from #555 ≈ 411132; gzip 126477 + ~1000 ≈ 127477.
-// Conservative caps: initialShell.gzip=117200 (budget=117456), firstChatScreen.gzip=127800.
+// Post-#550+#555 combined: initialShell raw 382290 / gzip 117111 (measured locally).
+// firstChatScreen raw 411xxx / gzip 127xxx (estimated, need CI measurement).
+// Conservative budget: initialShell.gzip=117367 (budget=117623 with variance),
+// firstChatScreen.gzip=127800. Re-baseline to exact CI measurement after first green run.
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 411_132, gzip: 127_800 },
+  firstChatScreen: { raw: 412_546, gzip: 127_800 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },
