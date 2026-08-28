@@ -88,7 +88,7 @@ describe('shell native host local_folder_pick', () => {
   it('keeps Windows folder picker arguments out of the PowerShell command text', () => {
     const source = readFileSync(pickerProviderPath, 'utf8');
 
-    expect(source).toContain("import { execFile, spawnSync } from 'node:child_process';");
+    expect(source).toContain("import { execFile } from 'node:child_process';");
     expect(source).not.toContain('execFileSync');
     expect(source).toContain("'-EncodedCommand', encodePowerShellCommand(script)");
     expect(source).toContain('DPP_FOLDER_PICK_TITLE');
@@ -147,7 +147,7 @@ describe('shell native host local_file_* tools', () => {
     });
     expect(firstRead.error).toBeUndefined();
     expect(firstRead.result?.structuredContent?.data.content).toBe(content.slice(0, 1200));
-    expect(firstRead.result?.structuredContent?.data.truncated).toBe(true);
+    expect(firstRead.result?.structuredContent?.data.hasMore).toBe(true);
     expect(firstRead.result?.structuredContent?.data.nextStart).toBe(1200);
 
     const secondRead = await callNativeHost('local_file_read', {

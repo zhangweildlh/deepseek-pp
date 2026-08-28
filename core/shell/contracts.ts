@@ -5,7 +5,7 @@ export const SHELL_MCP_NATIVE_HOST = 'com.deepseek_pp.shell';
 
 export const OFFICECLI_BIN_PATH = 'officecli';
 
-export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick', 'local_file_stat', 'local_file_read', 'local_file_write', 'local_file_edit','shell_session_begin', 'shell_session_exec', 'shell_session_end'] as const;
+export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick', 'local_file_stat', 'local_file_read', 'local_file_search', 'local_file_write', 'local_file_edit','shell_session_begin', 'shell_session_exec', 'shell_session_end'] as const;
 export type ShellToolName = typeof SHELL_TOOL_NAMES[number];
 
 export interface ShellToolSpec {
@@ -62,6 +62,12 @@ export const SHELL_TOOL_SPECS: readonly ShellToolSpec[] = [
     name: 'local_file_read',
     title: '读取本地文本文件',
     description: '按字符窗口读取本地 UTF-8 文本文件，支持分片读取大型文件。',
+    risk: 'medium',
+  },
+  {
+    name: 'local_file_search',
+    title: '检索本地文本文件',
+    description: '在本地 UTF-8 文本文件中检索文本，返回匹配行及其行号，并可选返回上下文行。',
     risk: 'medium',
   },
   {

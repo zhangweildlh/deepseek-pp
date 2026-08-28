@@ -179,6 +179,14 @@
           "type": "string",
           "description": "Absolute or home-relative local file path to read."
         },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "chars",
+            "lines"
+          ],
+          "description": "Read mode: \"chars\" for character offset (default) or \"lines\" for line numbers."
+        },
         "start": {
           "type": "integer",
           "minimum": 0,
@@ -189,14 +197,6 @@
           "minimum": 1,
           "maximum": 100000,
           "description": "Maximum characters to return. Default 16000. Only used in \"chars\" mode."
-        },
-        "mode": {
-          "type": "string",
-          "enum": [
-            "chars",
-            "lines"
-          ],
-          "description": "Read mode: \"chars\" for character offset (default) or \"lines\" for line numbers."
         },
         "start_line": {
           "type": "integer",
@@ -261,8 +261,8 @@
         },
         "expected_sha256": {
           "type": "string",
-          "description": "Optional SHA-256 of the complete file. If provided, the search fails if the current file hash differs.",
-          "pattern": "^[a-fA-F0-9]{64}$"
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "Optional SHA-256 of the complete file. If provided, the search fails if the current file hash differs."
         }
       },
       "required": [
@@ -332,8 +332,8 @@
         },
         "expected_sha256": {
           "type": "string",
-          "description": "SHA-256 of the complete file returned by the latest local_file_read. The edit is rejected if the file changed.",
-          "pattern": "^[a-fA-F0-9]{64}$"
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 of the complete file returned by the latest local_file_read. The edit is rejected if the file changed."
         }
       },
       "required": [
