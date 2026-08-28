@@ -88,7 +88,7 @@ describe('shell native host local_folder_pick', () => {
   it('keeps Windows folder picker arguments out of the PowerShell command text', () => {
     const source = readFileSync(pickerProviderPath, 'utf8');
 
-    expect(source).toContain("import { execFile } from 'node:child_process';");
+    expect(source).toContain("import { execFile, spawnSync } from 'node:child_process';");
     expect(source).not.toContain('execFileSync');
     expect(source).toContain("'-EncodedCommand', encodePowerShellCommand(script)");
     expect(source).toContain('DPP_FOLDER_PICK_TITLE');
@@ -102,7 +102,7 @@ describe('shell native host startup', () => {
     const hostSource = readFileSync(hostPath, 'utf8');
     const source = readFileSync(osAdapterPath, 'utf8');
 
-    expect(source).toContain("import { execFile } from 'node:child_process';");
+    expect(source).toContain("import { execFile, spawnSync } from 'node:child_process';");
     expect(source).not.toContain('execFileSync');
     expect(hostSource).toContain('const hostEnvironmentReady = Promise.resolve(');
     expect(hostSource).toContain('createNativeEnvelopeDispatcher({');

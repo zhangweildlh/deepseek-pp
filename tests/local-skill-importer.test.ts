@@ -121,6 +121,7 @@ describe('local Skill importer', () => {
           'local_file_stat',
           'local_file_read',
           'local_file_write',
+          'local_file_edit',
         ],
       },
     });
