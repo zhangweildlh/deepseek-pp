@@ -11,20 +11,20 @@
     "assetRawBytes": 588408
   },
   "skillSha256": {
-    "officecli": "d2139ffe19a7535517704a8f52ccac23e6c91c277fc3b5dbe5bb458f8e121f5a",
-    "officecli-docx": "9d024a3b0fdd3a3f9f02f4dbd35297c047df4e7f332f0eb72e07460c6db47bbe",
-    "officecli-xlsx": "92e031503f444c8e76fdc185b986ca13e49a3c2d294a8339dcab84977b243115",
-    "officecli-pptx": "8f36fc69e51dfff9f554c069d6e8dcbcff6087a8ac96b14650a3f393bd4fea57",
-    "officecli-academic-paper": "1070d1818e1550a4c842f8e842e539c7d540f82ebedb63676a968649a89ec077",
-    "officecli-word-form": "79a804474e37fa0d111b18c41007072b5d2f47938bfbbd777c0ca646b24f05c1",
-    "officecli-data-dashboard": "19e0391ad5e524a048c124b2ecf7d90a1ee8538dfcdb364d7c8436f2a62908f9",
-    "officecli-financial-model": "90ec6a61cec3dcce8f491441fd175d306c192c260260a6c01f7877c1c5df1d0f",
-    "officecli-pitch-deck": "a757497c6566917ea8a81c7117a02525f601a8cb740b2cde10e10c8a60e1db33",
-    "morph-ppt": "0e8b3bb26d76740cd564cfc934286fafd7a8d22ab0e61e100627bb08cbfd6b6a",
-    "morph-ppt-3d": "53c70f0a52ec4d01d9a2ba7b4701223ed9e42a3931e37820c009e5ec849df611",
+    "officecli": "3490336f848ea80d16594f1be61a491d161a38ad0977251d2c1c53edb50001e9",
+    "officecli-docx": "c8337cd7afdf6a767739c024fe2deff01af428a5c8e0beb69b0df1799569afce",
+    "officecli-xlsx": "e5012d4c7cb6af275a5f321dc5254bbbd6b2c462b2bb7979b5791b4da91771c4",
+    "officecli-pptx": "d28ba7c0df2abe9a6e6cf05776f0b6f9b3b9fd63843ef83615296d9d51deeacc",
+    "officecli-academic-paper": "79ce3752f62b8377890bd47c9877949a8877a48e3bfa4919dec41bf293ddfe70",
+    "officecli-word-form": "68dfb2a1b59717ab34be20dc5300b6d577383b68411f5cc9260ef2a41d7caa74",
+    "officecli-data-dashboard": "54925d67dfb1b367d8cc14bcb5120f9099d8408cbdd0f2e313571a8c383c87e6",
+    "officecli-financial-model": "85718bac014c678384f486825013415a7fdf3e0b0f0b63f7dbc638815db0c148",
+    "officecli-pitch-deck": "c8aca6ea59799e42188d22e6e757443a3966bc9b74577eff49b715c9c5d550c0",
+    "morph-ppt": "a8ae744d13ae3db34b66f74f3c45270b748d842ec831db4b4991bafa2a24e414",
+    "morph-ppt-3d": "2e3cf1285ae9783271378849cc408e849d70dae3b405acb7514afa4510c94b18",
     "officecli-styles": "370554440f304650984d72267d97606d8998f6b2767ed06f05f461c1903dbb89",
-    "spec-driven-develop": "de8b60ef7d51bb5f60ede2efe2586d6d5bb43978c0476bc5345ee558c90bc4b4",
-    "deep-discuss": "ff482d3ad9f08b0e69be3bcab30f52b6a890894ea00e0ade7a69129958bc59ba",
-    "review-spd": "c1998f816642f875fe066f37fd32afcfec84a07525cc9865ac06858e1a7867a2"
+    "spec-driven-develop": "382fba36bdc3f5c7056f7adb36013df1c02a3ed033cf1bef9695cc376b654bc4",
+    "deep-discuss": "fbe1d4f7600c99d7926c4decde6657920f496fa0b7cbd8ccab28cc29531b0b6c",
+    "review-spd": "38c35eb90eb23b5016e7454cb3ef87f7c1800a3daa08987dc4b1cbe2efcecd34"
   }
 }
