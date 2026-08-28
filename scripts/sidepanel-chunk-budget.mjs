@@ -175,27 +175,18 @@ const GZIP_ENCODER_VARIANCE_BYTES = 256;
 // Raised 125500 -> 125600 for 1.14.0: the same-build measurement under the
 // CI Node-22.23.1 runtime is 125600 gzip (local Node-25: 125307), so the cap
 // is set to the CI measurement to stay green on both runtimes.
-// Raised 408548 -> 410115 raw and 125600 -> 126477 gzip for #550
-// (feat/skill-import-phase4 rebased onto 1.14.0): the same local-skill i18n
-// keys that grow the initial shell also flow into the first-chat-screen graph
-// (+1567 raw / +621 gzip over the 1.14.0 cap, measured locally under
-// node@24.18). Raw is set to the measured value; gzip gets the standard 256-byte
-// encoder-variance allowance. CI (Node 22) gzip drift should be re-measured if
-// it exceeds the allowance.
-// Raised for #555 (Native Host Markdown direct-write): content.export i18n keys
-// (zh-CN/en) add ~1017 raw / ~1000 gzip to the first-chat-screen graph. Estimated
-// CI Node-22 drift (+~271-300 over local) suggests setting firstChatScreen gzip
-// cap to 127800; re-baseline to exact CI measurement after the first green CI run.
-// Post-#550+#555 combined: initialShell raw 382290 / gzip 117111 (measured locally).
-// firstChatScreen raw 411xxx / gzip 127xxx (estimated, need CI measurement).
-// Conservative budget: initialShell.gzip=117367 (budget=117623 with variance),
-// firstChatScreen.gzip=127800. Re-baseline to exact CI measurement after first green run.
+// Raised 408548 -> 410115 raw and 125600 -> 126477 gzip for #550.
+// Raised for #555 (Native Host Markdown direct-write): +~1017 raw / ~1000 gzip.
+// Post-#550+#555 combined: initialShell raw 382290 / gzip 117111.
+// firstChatScreen raw 412546 / gzip 127152 (measured locally).
+// Raised for #562 (project-sidebar menu stability): +2 gzip.
+// Conservative budget: firstChatScreen.gzip=127802 (+2 from #562).
 const BUDGET = Object.freeze({
   initialShell: {
     raw: BASELINE.initialShell.raw,
     gzip: BASELINE.initialShell.gzip + GZIP_ENCODER_VARIANCE_BYTES,
   },
-  firstChatScreen: { raw: 412_546, gzip: 127_800 },
+  firstChatScreen: { raw: 412_546, gzip: 127_802 },
   richRendererIncrement: { raw: 120_000, gzip: 36_000 },
   routeChunks: {
     ChatPage: { raw: 25_000, gzip: 8_000 },

@@ -5,7 +5,7 @@ export const SHELL_MCP_NATIVE_HOST = 'com.deepseek_pp.shell';
 
 export const OFFICECLI_BIN_PATH = 'officecli';
 
-export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick', 'local_file_stat', 'local_file_read', 'local_file_write', 'shell_session_begin', 'shell_session_exec', 'shell_session_end'] as const;
+export const SHELL_TOOL_NAMES = ['shell_exec', 'shell_status', 'python_status', 'python_exec', 'local_skill_preview', 'local_folder_pick', 'local_file_stat', 'local_file_read', 'local_file_search', 'local_file_write', 'local_file_edit','shell_session_begin', 'shell_session_exec', 'shell_session_end'] as const;
 export type ShellToolName = typeof SHELL_TOOL_NAMES[number];
 
 export interface ShellToolSpec {
@@ -65,10 +65,22 @@ export const SHELL_TOOL_SPECS: readonly ShellToolSpec[] = [
     risk: 'medium',
   },
   {
+    name: 'local_file_search',
+    title: '检索本地文本文件',
+    description: '在本地 UTF-8 文本文件中检索文本，返回匹配行及其行号，并可选返回上下文行。',
+    risk: 'medium',
+  },
+  {
     name: 'local_file_write',
     title: '写入本地文本文件',
     description: '将 UTF-8 文本原样写入本地文件，支持覆盖或追加，并可自动创建父目录。',
     risk: 'high',
+  },
+  {
+  name: 'local_file_edit',
+  title: '安全编辑本地文本文件',
+  description: '基于 SHA-256 与精确唯一匹配安全修改现有本地文本文件；文件已变化、目标不存在或匹配不唯一时拒绝修改。',
+  risk: 'high',
   },
   {
     name: 'shell_session_begin',

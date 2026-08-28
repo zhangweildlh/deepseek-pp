@@ -102,7 +102,7 @@ describe('shell native host startup', () => {
     const hostSource = readFileSync(hostPath, 'utf8');
     const source = readFileSync(osAdapterPath, 'utf8');
 
-    expect(source).toContain("import { execFile } from 'node:child_process';");
+    expect(source).toContain("import { execFile, spawnSync } from 'node:child_process';");
     expect(source).not.toContain('execFileSync');
     expect(hostSource).toContain('const hostEnvironmentReady = Promise.resolve(');
     expect(hostSource).toContain('createNativeEnvelopeDispatcher({');
@@ -147,7 +147,7 @@ describe('shell native host local_file_* tools', () => {
     });
     expect(firstRead.error).toBeUndefined();
     expect(firstRead.result?.structuredContent?.data.content).toBe(content.slice(0, 1200));
-    expect(firstRead.result?.structuredContent?.data.truncated).toBe(true);
+    expect(firstRead.result?.structuredContent?.data.hasMore).toBe(true);
     expect(firstRead.result?.structuredContent?.data.nextStart).toBe(1200);
 
     const secondRead = await callNativeHost('local_file_read', {
